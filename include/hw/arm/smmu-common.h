@@ -177,6 +177,7 @@ struct SMMUState {
     IOMMUFDBackend *iommufd;
     SMMUViommu *viommu;
     bool nested;
+    bool has_cmdqv;
 
     GHashTable *smmu_pcibus_by_busptr;
     GHashTable *configs; /* cache for configuration data */
