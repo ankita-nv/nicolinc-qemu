@@ -155,6 +155,7 @@ struct SMMUState {
     IOMMUFDViommu *viommu;
     SMMUHwpt *s2_hwpt;
     bool nested;
+    bool has_vcmdq;
 
     GHashTable *smmu_pcibus_by_busptr;
     GHashTable *configs; /* cache for configuration data */

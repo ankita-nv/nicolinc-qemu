@@ -78,6 +78,10 @@ SMMUTLBEntry *smmu_iotlb_lookup(SMMUState *bs, SMMUTransCfg *cfg,
     uint8_t level = 4 - (inputsize - 4) / stride;
     SMMUTLBEntry *entry = NULL;
 
+    /* With VCMDQ, TLBI commands will not be trapped so it cannot use iotlb */
+    if (bs->has_vcmdq) {
+        return NULL;
+    }
     while (level <= 3) {
         uint64_t subpage_size = 1ULL << level_shift(level, tt->granule_sz);
         uint64_t mask = subpage_size - 1;
@@ -113,6 +117,10 @@ void smmu_iotlb_insert(SMMUState *bs, SMMUTransCfg *cfg, SMMUTLBEntry *new)
     SMMUIOTLBKey *key = g_new0(SMMUIOTLBKey, 1);
     uint8_t tg = (new->granule - 10) / 2;
 
+    /* With VCMDQ, TLBI commands will not be trapped so it cannot use iotlb */
+    if (bs->has_vcmdq) {
+        return;
+    }
     if (g_hash_table_size(bs->iotlb) >= SMMU_IOTLB_MAX_SIZE) {
         smmu_iotlb_inv_all(bs);
     }
@@ -660,6 +668,18 @@ static int smmu_dev_set_iommu_device(PCIBus *bus, void *opaque, int devfn,
         s->s2_hwpt->ioas_id = idev->ioas_id;
         s->s2_hwpt->iommufd = s->iommufd->fd;
         s->s2_hwpt->hwpt_id = s2_hwpt_id;
+
+        if (s->has_vcmdq) {
+            // FIXME
+            if (!idev->iommufd) {
+                idev->iommufd = s->iommufd;
+            }
+            s->viommu = iommufd_device_alloc_viommu(idev, s2_hwpt_id);
+            if (!s->viommu) {
+                error_report("Unable to allocate viommu");
+                s->has_vcmdq = false;
+            }
+        }
     }
 
     ret = iommufd_device_attach_hwpt(idev, s->s2_hwpt->hwpt_id);
@@ -676,6 +696,12 @@ static int smmu_dev_set_iommu_device(PCIBus *bus, void *opaque, int devfn,
     sdev->idev = idev;
     QLIST_INSERT_HEAD(&s->devices_with_nesting, sdev, next);
     trace_smmu_set_iommu_device(devfn, smmu_get_sid(sdev));
+
+    ret = smmu_iommu_dev_set_virtual_id(sdev, 0, smmu_get_sid(sdev));
+    if (ret) {
+        error_report("failed to set Virtual id %d", smmu_get_sid(sdev));
+        return ret;
+    }
 
     return 0;
 }
@@ -898,7 +924,7 @@ int smmu_iommu_dev_set_virtual_id(SMMUDevice *sdev,
 
 void *smmu_iommu_get_shared_page(SMMUState *s, uint32_t size, bool readonly)
 {
-    if (!s->iommufd || !s->viommu) {
+    if (!s->iommufd || !s->viommu || !s->has_vcmdq) {
         return NULL;
     }
     return iommufd_viommu_get_shared_page(s->iommufd->fd, s->viommu->viommu_id,
@@ -907,7 +933,7 @@ void *smmu_iommu_get_shared_page(SMMUState *s, uint32_t size, bool readonly)
 
 void smmu_iommu_put_shared_page(SMMUState *s, void *page, uint32_t size)
 {
-    if (!s->iommufd || !s->viommu) {
+    if (!s->iommufd || !s->viommu || !s->has_vcmdq) {
         return;
     }
     iommufd_viommu_put_shared_page(s->iommufd->fd, s->viommu->viommu_id,
@@ -992,6 +1018,7 @@ static Property smmu_dev_properties[] = {
     DEFINE_PROP_LINK("iommufd", SMMUState, iommufd,
                      TYPE_IOMMUFD_BACKEND, IOMMUFDBackend *),
     DEFINE_PROP_BOOL("nested", SMMUState, nested, false),
+    DEFINE_PROP_BOOL("vcmdq", SMMUState, has_vcmdq, false),
     DEFINE_PROP_END_OF_LIST(),
 };
 
