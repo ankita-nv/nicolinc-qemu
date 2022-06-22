@@ -20,12 +20,14 @@
 #include "trace.h"
 #include "exec/target_page.h"
 #include "hw/core/cpu.h"
+#include "hw/pci/pci_device.h"
 #include "hw/qdev-properties.h"
 #include "qapi/error.h"
 #include "qemu/jhash.h"
 #include "qemu/module.h"
 
 #include "sysemu/iommufd.h"
+#include <linux/iommufd.h>
 
 #include "qemu/error-report.h"
 #include "hw/arm/smmu-common.h"
@@ -652,8 +654,192 @@ static AddressSpace *smmu_find_add_as(PCIBus *bus, void *opaque, int devfn)
     return &sdev->as;
 }
 
+static bool smmu_dev_attach_viommu(SMMUDevice *sdev,
+                                   HostIOMMUDeviceIOMMUFD *idev, Error **errp)
+{
+    struct iommu_hwpt_arm_smmuv3 bypass_data = {
+        .ste = { 0x9ULL, 0x0ULL }, //0x1ULL << (108 - 64) },
+    };
+    struct iommu_hwpt_arm_smmuv3 abort_data = {
+        .ste = { 0x1ULL, 0x0ULL },
+    };
+    SMMUState *s = sdev->smmu;
+    SMMUS2Hwpt *s2_hwpt;
+    SMMUViommu *viommu;
+    uint32_t s2_hwpt_id;
+    int ret;
+
+    if (s->viommu) {
+        return host_iommu_device_iommufd_attach_hwpt(
+                       idev, s->viommu->s2_hwpt->hwpt_id, errp);
+    }
+
+    ret = iommufd_backend_alloc_hwpt(s->iommufd, idev->devid,
+                                     idev->ioas_id,
+                                     IOMMU_HWPT_ALLOC_NEST_PARENT,
+                                     IOMMU_HWPT_DATA_NONE, 0, NULL,
+                                     &s2_hwpt_id);
+    if (ret) {
+        error_setg(errp, "failed to allocate an S2 hwpt");
+        return false;
+    }
+
+    /* Attach to S2 for MSI cookie */
+    if (!host_iommu_device_iommufd_attach_hwpt(idev, s2_hwpt_id, errp)) {
+        error_setg(errp, "failed to attach stage-2 HW pagetable");
+        goto free_s2_hwpt;
+    }
+
+    viommu = g_new0(SMMUViommu, 1);
+
+    viommu->core = iommufd_backend_alloc_viommu(s->iommufd, idev->devid,
+                                                IOMMU_VIOMMU_TYPE_DEFAULT,
+                                                s2_hwpt_id);
+    if (!viommu->core) {
+        error_setg(errp, "failed to allocate a viommu");
+        goto free_viommu;
+    }
+
+    ret = iommufd_backend_alloc_hwpt(s->iommufd, idev->devid,
+                                     viommu->core->viommu_id, 0,
+                                     IOMMU_HWPT_DATA_ARM_SMMUV3,
+                                     sizeof(abort_data), &abort_data,
+                                     &viommu->abort_hwpt_id);
+    if (ret) {
+        error_setg(errp, "failed to allocate an abort pagetable");
+        goto free_viommu_core;
+    }
+
+    ret = iommufd_backend_alloc_hwpt(s->iommufd, idev->devid,
+                                     viommu->core->viommu_id, 0,
+                                     IOMMU_HWPT_DATA_ARM_SMMUV3,
+                                     sizeof(bypass_data), &bypass_data,
+                                     &viommu->bypass_hwpt_id);
+    if (ret) {
+        error_setg(errp, "failed to allocate a bypass pagetable");
+        goto free_abort_hwpt;
+    }
+
+    if (!host_iommu_device_iommufd_attach_hwpt(
+                idev, viommu->bypass_hwpt_id, errp)) {
+        error_setg(errp, "failed to attach bypass pagetable");
+        goto free_bypass_hwpt;
+    }
+    s2_hwpt = g_new0(SMMUS2Hwpt, 1);
+    s2_hwpt->iommufd = s->iommufd;
+    s2_hwpt->hwpt_id = s2_hwpt_id;
+    s2_hwpt->ioas_id = idev->ioas_id;
+
+    viommu->iommufd = s->iommufd;
+    viommu->s2_hwpt = s2_hwpt;
+
+    s->viommu = viommu;
+    return true;
+
+free_bypass_hwpt:
+    iommufd_backend_free_id(s->iommufd, viommu->bypass_hwpt_id);
+free_abort_hwpt:
+    iommufd_backend_free_id(s->iommufd, viommu->abort_hwpt_id);
+free_viommu_core:
+    iommufd_backend_free_id(s->iommufd, viommu->core->viommu_id);
+    g_free(viommu->core);
+free_viommu:
+    g_free(viommu);
+    host_iommu_device_iommufd_attach_hwpt(idev, sdev->idev->ioas_id, errp);
+free_s2_hwpt:
+    iommufd_backend_free_id(s->iommufd, s2_hwpt_id);
+    return false;
+}
+
+static bool smmu_dev_set_iommu_device(PCIBus *bus, void *opaque, int devfn,
+                                     HostIOMMUDevice *hiod, Error **errp)
+{
+    HostIOMMUDeviceIOMMUFD *idev = HOST_IOMMU_DEVICE_IOMMUFD(hiod);
+    SMMUState *s = opaque;
+    SMMUPciBus *sbus = smmu_get_sbus(s, bus);
+    SMMUDevice *sdev = smmu_get_sdev(s, sbus, bus, devfn);
+
+    if (!s->iommufd) {
+        return false;//-ENOENT;
+    }
+
+    if (!s->nested) {
+        return true;
+    }
+
+    if (sdev->idev) {
+        if (sdev->idev != idev) {
+            return false;//-EEXIST;
+        } else {
+            return true;
+        }
+    }
+
+    if (!idev) {
+        return true;
+    }
+
+    if (!smmu_dev_attach_viommu(sdev, idev, errp)) {
+        error_report("Unable to attach viommu");
+        return false;
+    }
+
+    sdev->idev = idev;
+    sdev->viommu = s->viommu;
+    QLIST_INSERT_HEAD(&s->viommu->device_list, sdev, next);
+    trace_smmu_set_iommu_device(devfn, smmu_get_sid(sdev));
+
+    return true;
+}
+
+static void smmu_dev_unset_iommu_device(PCIBus *bus, void *opaque, int devfn)
+{
+    SMMUDevice *sdev;
+    SMMUViommu *viommu;
+    SMMUState *s = opaque;
+    SMMUPciBus *sbus = g_hash_table_lookup(s->smmu_pcibus_by_busptr, bus);
+
+    if (!s->iommufd || !s->nested) {
+        return;
+    }
+
+    if (!sbus) {
+        return;
+    }
+
+    sdev = sbus->pbdev[devfn];
+    if (!sdev) {
+        return;
+    }
+
+    if (!host_iommu_device_iommufd_attach_hwpt(sdev->idev,
+                                               sdev->idev->ioas_id, NULL)) {
+        error_report("Unable to attach dev to the default HW pagetable");
+    }
+
+    viommu = sdev->viommu;
+
+    sdev->idev = NULL;
+    sdev->viommu = NULL;
+    QLIST_REMOVE(sdev, next);
+    trace_smmu_unset_iommu_device(devfn, smmu_get_sid(sdev));
+
+    if (QLIST_EMPTY(&viommu->device_list)) {
+        iommufd_backend_free_id(s->iommufd, viommu->bypass_hwpt_id);
+        iommufd_backend_free_id(s->iommufd, viommu->abort_hwpt_id);
+        iommufd_backend_free_id(s->iommufd, viommu->core->viommu_id);
+        g_free(viommu->core);
+        iommufd_backend_free_id(s->iommufd, viommu->s2_hwpt->hwpt_id);
+        g_free(viommu->s2_hwpt);
+        g_free(viommu);
+        s->viommu = NULL;
+    }
+}
+
 static const PCIIOMMUOps smmu_ops = {
     .get_address_space = smmu_find_add_as,
+    .set_iommu_device = smmu_dev_set_iommu_device,
+    .unset_iommu_device = smmu_dev_unset_iommu_device,
 };
 
 SMMUDevice *smmu_find_sdev(SMMUState *s, uint32_t sid)
