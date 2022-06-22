@@ -149,6 +149,9 @@ struct SMMUState {
     const char *mrtypename;
     MemoryRegion iomem;
 
+    /* Nested SMMU */
+    bool nested;
+
     GHashTable *smmu_pcibus_by_busptr;
     GHashTable *configs; /* cache for configuration data */
     GHashTable *iotlb;
