@@ -22,6 +22,7 @@
 #include "hw/sysbus.h"
 #include "hw/pci/pci.h"
 #include "qom/object.h"
+#include "sysemu/iommufd.h"
 
 #define SMMU_PCI_BUS_MAX                    256
 #define SMMU_PCI_DEVFN_MAX                  256
@@ -136,6 +137,10 @@ struct SMMUState {
     SysBusDevice  dev;
     const char *mrtypename;
     MemoryRegion iomem;
+
+    /* Nested SMMU */
+    IOMMUFDBackend *iommufd;
+    bool nested;
 
     GHashTable *smmu_pcibus_by_busptr;
     GHashTable *configs; /* cache for configuration data */
