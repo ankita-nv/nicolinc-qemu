@@ -1429,6 +1429,9 @@ static DeviceState *_create_smmu(const VirtMachineState *vms, PCIBus *bus,
     object_property_set_link(OBJECT(dev), "primary-bus", OBJECT(bus),
                              &error_abort);
     if (vms->iommu == VIRT_IOMMU_NESTED_SMMUV3) {
+        g_assert(vms->iommufd);
+        object_property_set_link(OBJECT(dev), "iommufd", OBJECT(vms->iommufd),
+                                 &error_abort);
         object_property_set_bool(OBJECT(dev), "nested", true, &error_abort);
     }
     sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
@@ -3397,6 +3400,13 @@ static void virt_machine_class_init(ObjectClass *oc, void *data)
     object_class_property_set_description(oc, "gic-version",
                                           "Set GIC version. "
                                           "Valid values are 2, 3, 4, host and max");
+
+    object_class_property_add_link(oc, "iommufd", TYPE_IOMMUFD_BACKEND,
+                                   offsetof(VirtMachineState, iommufd),
+                                   object_property_allow_set_link,
+                                   OBJ_PROP_LINK_STRONG);
+    object_class_property_set_description(oc, "iommufd",
+                                          "Set the IOMMUFD handler from \"-iommufd\"");
 
     object_class_property_add_str(oc, "iommu", virt_get_iommu, virt_set_iommu);
     object_class_property_set_description(oc, "iommu",
