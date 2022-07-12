@@ -36,6 +36,7 @@
 #include "hw/arm/boot.h"
 #include "hw/arm/bsa.h"
 #include "hw/block/flash.h"
+#include "sysemu/iommufd.h"
 #include "sysemu/kvm.h"
 #include "hw/intc/arm_gicv3_common.h"
 #include "qom/object.h"
@@ -168,6 +169,7 @@ struct VirtMachineState {
     int num_nested_smmus;
     OnOffAuto acpi;
     VirtGICType gic_version;
+    IOMMUFDBackend *iommufd;
     VirtIOMMUType iommu;
     bool default_bus_bypass_iommu;
     VirtMSIControllerType msi_controller;
