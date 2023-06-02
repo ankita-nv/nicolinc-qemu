@@ -158,6 +158,40 @@ int iommufd_device_set_virtual_id(IOMMUFDDevice *idev, IOMMUFDViommu *viommu,
     return ret;
 }
 
+void *iommufd_viommu_get_shared_page(int iommufd, uint32_t viommu_id,
+                                     uint32_t size, bool readonly)
+{
+    uintptr_t pgsize = qemu_real_host_page_size();
+    off_t offset = viommu_id * pgsize;
+    int prot = PROT_READ;
+    void *page;
+
+    if (!viommu_id) {
+        error_report("failed to get shared page with a NULL viommu_id");
+        return NULL;
+    }
+    if (!readonly) {
+        prot |= PROT_WRITE;
+    }
+
+    page = mmap(NULL, size, prot, MAP_SHARED, iommufd, offset);
+    if (page == MAP_FAILED) {
+        error_report("failed to get shared page (size=0x%x) for viommu (id=%d)",
+                     size, viommu_id);
+        return NULL;
+    }
+
+    trace_iommufd_viommu_get_shared_page(iommufd, viommu_id, size, readonly);
+
+    return page;
+}
+
+void iommufd_viommu_put_shared_page(int iommufd, uint32_t viommu_id,
+                                    void *page, uint32_t size)
+{
+    munmap(page, size);
+}
+
 void iommufd_device_init(void *_idev, size_t instance_size,
                          IOMMUFDBackend *iommufd, uint32_t dev_id,
                          uint32_t ioas_id, IOMMUFDDeviceOps *ops)

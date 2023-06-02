@@ -21,3 +21,4 @@ iommufd_device_invalidate_cache(int iommufd, uint32_t dev_id, uint32_t data_type
 iommufd_device_alloc_viommu(int iommufd, uint32_t dev_id, uint32_t hwpt_id, uint32_t viommu_id, int ret) " iommufd=%d dev_id=%u hwpt_id=%u viommu_id=%u (%d)"
 iommufd_viommu_set_data(int iommufd, uint32_t viommu_id, uint32_t data_type, uint32_t len, uint64_t data_ptr, int ret) " iommufd=%d viommu_id=%u data_type=%u len=%u data_ptr=0x%"PRIx64" (%d)"
 iommufd_device_set_virtual_id(int iommufd, uint32_t dev_id, uint32_t viommu_id, uint32_t id_type, uint64_t id, int ret) " iommufd=%d dev_id=%u viommu_id=%u id_type=%u id=0x%"PRIx64" (%d)"
+iommufd_viommu_get_shared_page(int iommufd, uint32_t viommu_id, uint32_t size, bool readonly) " iommufd=%d viommu_id=%u size=0x%x readonly=%d"
