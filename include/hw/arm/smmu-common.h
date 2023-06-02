@@ -253,4 +253,6 @@ int smmu_hwpt_invalidate_cache(SMMUS1Hwpt *s1_hwpt, uint32_t type, uint32_t len,
                                uint32_t *num, void *reqs);
 int smmu_viommu_invalidate_cache(IOMMUFDViommu *viommu, uint32_t type,
                                  uint32_t len, uint32_t *num, void *reqs);
+void *smmu_iommu_get_shared_page(SMMUState *s, uint32_t size, bool readonly);
+void smmu_iommu_put_shared_page(SMMUState *s, void *page, uint32_t size);
 #endif /* HW_ARM_SMMU_COMMON_H */

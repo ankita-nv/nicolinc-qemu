@@ -991,6 +991,23 @@ int smmu_viommu_invalidate_cache(IOMMUFDViommu *viommu, uint32_t type,
                                            type, len, num, reqs);
 }
 
+void *smmu_iommu_get_shared_page(SMMUState *s, uint32_t size, bool readonly)
+{
+    if (!s->iommufd || !s->viommu) {
+        return NULL;
+    }
+    return iommufd_viommu_get_shared_page(s->viommu,
+                                          size, readonly);
+}
+
+void smmu_iommu_put_shared_page(SMMUState *s, void *page, uint32_t size)
+{
+    if (!s->iommufd || !s->viommu) {
+        return;
+    }
+    iommufd_viommu_put_shared_page(s->viommu, page, size);
+}
+
 /* Unmap all notifiers attached to @mr */
 static void smmu_inv_notifiers_mr(IOMMUMemoryRegion *mr)
 {
