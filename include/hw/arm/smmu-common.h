@@ -236,4 +236,6 @@ int smmu_iommu_set_viommu_data(SMMUState *s, uint32_t data_type,
                                uint32_t data_len, void *data);
 int smmu_iommu_dev_set_virtual_id(SMMUDevice *sdev,
                                   uint32_t id_type, uint64_t id);
+void *smmu_iommu_get_shared_page(SMMUState *s, uint32_t size, bool readonly);
+void smmu_iommu_put_shared_page(SMMUState *s, void *page, uint32_t size);
 #endif /* HW_ARM_SMMU_COMMON_H */

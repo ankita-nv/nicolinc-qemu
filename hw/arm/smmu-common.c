@@ -887,6 +887,24 @@ int smmu_iommu_dev_set_virtual_id(SMMUDevice *sdev,
     return iommufd_device_set_virtual_id(idev, s->viommu, id_type, id);
 }
 
+void *smmu_iommu_get_shared_page(SMMUState *s, uint32_t size, bool readonly)
+{
+    if (!s->iommufd || !s->viommu) {
+        return NULL;
+    }
+    return iommufd_viommu_get_shared_page(s->iommufd->fd, s->viommu->viommu_id,
+                                          size, readonly);
+}
+
+void smmu_iommu_put_shared_page(SMMUState *s, void *page, uint32_t size)
+{
+    if (!s->iommufd || !s->viommu) {
+        return;
+    }
+    iommufd_viommu_put_shared_page(s->iommufd->fd, s->viommu->viommu_id,
+                                   page, size);
+}
+
 /* Unmap all notifiers attached to @mr */
 static void smmu_inv_notifiers_mr(IOMMUMemoryRegion *mr)
 {
