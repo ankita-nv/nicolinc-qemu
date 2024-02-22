@@ -135,6 +135,29 @@ int iommufd_viommu_set_data(IOMMUFDViommu *viommu,
     return ret;
 }
 
+int iommufd_device_set_virtual_id(IOMMUFDDevice *idev, IOMMUFDViommu *viommu,
+                                  uint32_t id_type, uint64_t id)
+{
+    int ret, fd = idev->iommufd->fd;
+    struct iommu_dev_set_virtual_id set_id = {
+        .size = sizeof(set_id),
+        .dev_id = idev->dev_id,
+        .viommu_id = viommu->viommu_id,
+        .id_type = id_type,
+        .id = id,
+    };
+
+    ret = ioctl(fd, IOMMU_DEV_SET_VIRTUAL_ID, &set_id);
+
+    trace_iommufd_device_set_virtual_id(fd, idev->dev_id, viommu->viommu_id,
+                                        id_type, id, ret);
+    if (ret) {
+        error_report("Failed to set virtual id %d", ret);
+    }
+
+    return ret;
+}
+
 void iommufd_device_init(void *_idev, size_t instance_size,
                          IOMMUFDBackend *iommufd, uint32_t dev_id,
                          uint32_t ioas_id, IOMMUFDDeviceOps *ops)
