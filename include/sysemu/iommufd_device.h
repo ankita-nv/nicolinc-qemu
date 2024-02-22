@@ -16,6 +16,7 @@
 #include "sysemu/iommufd.h"
 
 typedef struct IOMMUFDDevice IOMMUFDDevice;
+typedef struct IOMMUFDViommu IOMMUFDViommu;
 
 typedef struct IOMMUFDDeviceOps {
     int (*attach_hwpt)(IOMMUFDDevice *idev, uint32_t hwpt_id);
@@ -30,6 +31,12 @@ struct IOMMUFDDevice {
     IOMMUFDDeviceOps *ops;
 };
 
+struct IOMMUFDViommu {
+    IOMMUFDBackend *iommufd;
+    uint32_t s2_hwpt_id;
+    uint32_t viommu_id;
+};
+
 int iommufd_device_attach_hwpt(IOMMUFDDevice *idev, uint32_t hwpt_id);
 int iommufd_device_detach_hwpt(IOMMUFDDevice *idev);
 int iommufd_device_get_info(IOMMUFDDevice *idev,
@@ -41,4 +48,6 @@ int iommufd_device_invalidate_cache(IOMMUFDDevice *ideve,
 void iommufd_device_init(void *_idev, size_t instance_size,
                          IOMMUFDBackend *iommufd, uint32_t dev_id,
                          uint32_t ioas_id, IOMMUFDDeviceOps *ops);
+struct IOMMUFDViommu *iommufd_device_alloc_viommu(IOMMUFDDevice *idev,
+                                                  uint32_t hwpt_id);
 #endif
