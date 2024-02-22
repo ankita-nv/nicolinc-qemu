@@ -869,6 +869,24 @@ int smmu_iommu_set_viommu_data(SMMUState *s, uint32_t data_type,
     return iommufd_viommu_set_data(s->viommu, data_type, data_len, data);
 }
 
+int smmu_iommu_dev_set_virtual_id(SMMUDevice *sdev,
+                                  uint32_t id_type, uint64_t id)
+{
+    SMMUState *s = sdev->smmu;
+    IOMMUFDDevice *idev;
+
+    if (!s->viommu) {
+        return 0;
+    }
+    if (!sdev || !s->s2_hwpt) {
+        return -ENOENT;
+    }
+
+    idev = sdev->idev;
+
+    return iommufd_device_set_virtual_id(idev, s->viommu, id_type, id);
+}
+
 /* Unmap all notifiers attached to @mr */
 static void smmu_inv_notifiers_mr(IOMMUMemoryRegion *mr)
 {
