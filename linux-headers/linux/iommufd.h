@@ -51,6 +51,10 @@ enum {
 	IOMMUFD_CMD_HWPT_GET_DIRTY_BITMAP,
 	IOMMUFD_CMD_HWPT_INVALIDATE,
 	IOMMUFD_CMD_DEV_INVALIDATE,
+	IOMMUFD_CMD_VIOMMU_ALLOC,
+	IOMMUFD_CMD_DEV_SET_VIRTUAL_ID,
+	IOMMUFD_CMD_VIOMMU_SET_DATA,
+	IOMMUFD_CMD_VIOMMU_RESET,
 };
 
 /**
@@ -567,7 +571,7 @@ enum iommufd_hw_capabilities {
  *                 iommu_hw_info_type.
  * @out_capabilities: Output the generic iommu capability info type as defined
  *                    in the enum iommu_hw_capabilities.
- * @__reserved: Must be 0
+ * @out_iommu_id: The ID of the iommu that's behind the device; starts from 0.
  *
  * Query an iommu type specific hardware information data from an iommu behind
  * a given device that has been bound to iommufd. This hardware info data will
@@ -590,7 +594,7 @@ struct iommu_hw_info {
 	__u32 data_len;
 	__aligned_u64 data_uptr;
 	__u32 out_data_type;
-	__u32 __reserved;
+	__u32 out_iommu_id;
 	__aligned_u64 out_capabilities;
 };
 #define IOMMU_GET_HW_INFO _IO(IOMMUFD_TYPE, IOMMUFD_CMD_GET_HW_INFO)
@@ -820,4 +824,67 @@ struct iommu_dev_invalidate {
 	__u32 __reserved;
 };
 #define IOMMU_DEV_INVALIDATE _IO(IOMMUFD_TYPE, IOMMUFD_CMD_DEV_INVALIDATE)
+
+/**
+ * struct iommu_viommu_alloc - ioctl(IOMMU_VIOMMU_ALLOC)
+ * @size: sizeof(struct iommu_viommu_alloc)
+ * @flags: Must be 0
+ * @dev_id: The device to allocate this virtual IOMMU for
+ * @hwpt_id: ID of a nested parent HWPT
+ * @out_viommu_id: Output virtual IOMMU ID for the allocated object
+ *
+ * Allocate an virtual IOMMU object that holds a (shared) nested parent HWPT
+ */
+struct iommu_viommu_alloc {
+	__u32 size;
+	__u32 flags;
+	__u32 dev_id;
+	__u32 hwpt_id;
+	__u32 out_viommu_id;
+};
+#define IOMMU_VIOMMU_ALLOC _IO(IOMMUFD_TYPE, IOMMUFD_CMD_VIOMMU_ALLOC)
+
+struct iommu_dev_set_virtual_id {
+	__u32 size;
+	__u32 dev_id;
+	__u32 viommu_id;
+	__u32 id_type;
+	__aligned_u64 id;
+};
+#define IOMMU_DEV_SET_VIRTUAL_ID _IO(IOMMUFD_TYPE, IOMMUFD_CMD_DEV_SET_VIRTUAL_ID)
+
+/**
+ * enum iommu_viommu_data_type - VIOMMU Data Type
+ * @IOMMU_VIOMMU_DATA_NVGRACE_VCMDQ: NVIDIA Grace VCMDQ Extension for SMMUv3
+ */
+enum iommu_viommu_data_type {
+	IOMMU_VIOMMU_DATA_NVGRACE_VCMDQ,
+};
+
+struct iommu_viommu_nvgrace_vcmdq {
+	__u32 vcmdq_id;
+	__u32 vcmdq_log2size;
+	__aligned_u64 vcmdq_base;
+	__aligned_u64 cons_idx_base;
+};
+
+struct iommu_viommu_set_data {
+	__u32 size;
+	__u32 flags;
+	__u32 viommu_id;
+	__u32 __reserved;
+	__u32 data_type;
+	__u32 data_len;
+	__aligned_u64 data_uptr;
+};
+#define IOMMU_VIOMMU_SET_DATA _IO(IOMMUFD_TYPE, IOMMUFD_CMD_VIOMMU_SET_DATA)
+
+struct iommu_viommu_reset {
+	__u32 size;
+	__u32 flags;
+	__u32 viommu_id;
+	__u32 __reserved;
+};
+#define IOMMU_VIOMMU_RESET _IO(IOMMUFD_TYPE, IOMMUFD_CMD_VIOMMU_RESET)
+
 #endif

@@ -36,7 +36,6 @@ int iommufd_device_get_info(IOMMUFDDevice *idev,
         .flags = 0,
         .dev_id = idev->dev_id,
         .data_len = len,
-        .__reserved = 0,
         .data_uptr = (uintptr_t)data,
     };
     int ret;
