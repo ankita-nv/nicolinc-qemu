@@ -859,6 +859,16 @@ int smmu_iommu_dev_invalidate_cache(SMMUDevice *sdev, uint32_t type,
     return iommufd_device_invalidate_cache(idev, type, len, num, reqs);
 }
 
+int smmu_iommu_set_viommu_data(SMMUState *s, uint32_t data_type,
+                               uint32_t data_len, void *data)
+{
+    if (!s->viommu) {
+        return 0;
+    }
+
+    return iommufd_viommu_set_data(s->viommu, data_type, data_len, data);
+}
+
 /* Unmap all notifiers attached to @mr */
 static void smmu_inv_notifiers_mr(IOMMUMemoryRegion *mr)
 {

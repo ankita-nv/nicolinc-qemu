@@ -152,6 +152,7 @@ struct SMMUState {
     MemoryRegion sysmem;
     /* /dev/iommu interface */
     IOMMUFDBackend *iommufd;
+    IOMMUFDViommu *viommu;
     SMMUHwpt *s2_hwpt;
     bool nested;
 
@@ -231,4 +232,6 @@ int smmu_iommu_invalidate_cache(SMMUDevice *sdev, uint32_t type, uint32_t len,
                                 uint32_t *num, void *reqs);
 int smmu_iommu_dev_invalidate_cache(SMMUDevice *sdev, uint32_t type,
                                     uint32_t len, uint32_t *num, void *reqs);
+int smmu_iommu_set_viommu_data(SMMUState *s, uint32_t data_type,
+                               uint32_t data_len, void *data);
 #endif /* HW_ARM_SMMU_COMMON_H */
