@@ -50,4 +50,6 @@ void iommufd_device_init(void *_idev, size_t instance_size,
                          uint32_t ioas_id, IOMMUFDDeviceOps *ops);
 struct IOMMUFDViommu *iommufd_device_alloc_viommu(IOMMUFDDevice *idev,
                                                   uint32_t hwpt_id);
+int iommufd_viommu_set_data(IOMMUFDViommu *viommu,
+                            uint32_t data_type, uint32_t len, void *data_ptr);
 #endif

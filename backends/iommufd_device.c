@@ -111,6 +111,30 @@ struct IOMMUFDViommu *iommufd_device_alloc_viommu(IOMMUFDDevice *idev,
     return viommu;
 }
 
+int iommufd_viommu_set_data(IOMMUFDViommu *viommu,
+                            uint32_t data_type, uint32_t len, void *data_ptr)
+{
+    int ret, fd = viommu->iommufd->fd;
+    struct iommu_viommu_set_data viommu_set_data = {
+        .size = sizeof(viommu_set_data),
+        .flags = 0,
+        .viommu_id = viommu->viommu_id,
+        .data_type = data_type,
+        .data_len = len,
+        .data_uptr = (uint64_t)data_ptr,
+    };
+
+    ret = ioctl(fd, IOMMU_VIOMMU_SET_DATA, &viommu_set_data);
+
+    trace_iommufd_viommu_set_data(fd, viommu->viommu_id, data_type,
+                                  len, (uint64_t)data_ptr, ret);
+    if (ret) {
+        ret = -errno;
+        error_report("IOMMU_VIOMMU_SET_DATA failed: %s", strerror(errno));
+    }
+    return ret;
+}
+
 void iommufd_device_init(void *_idev, size_t instance_size,
                          IOMMUFDBackend *iommufd, uint32_t dev_id,
                          uint32_t ioas_id, IOMMUFDDeviceOps *ops)
