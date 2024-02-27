@@ -869,6 +869,15 @@ int smmu_iommu_set_viommu_data(SMMUState *s, uint32_t data_type,
     return iommufd_viommu_set_data(s->viommu, data_type, data_len, data);
 }
 
+int smmu_iommu_reset_viommu(SMMUState *s)
+{
+    if (!s->viommu) {
+        return 0;
+    }
+
+    return iommufd_viommu_reset(s->viommu);
+}
+
 int smmu_iommu_dev_set_virtual_id(SMMUDevice *sdev,
                                   uint32_t id_type, uint64_t id)
 {
