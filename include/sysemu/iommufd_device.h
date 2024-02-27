@@ -52,6 +52,7 @@ struct IOMMUFDViommu *iommufd_device_alloc_viommu(IOMMUFDDevice *idev,
                                                   uint32_t hwpt_id);
 int iommufd_viommu_set_data(IOMMUFDViommu *viommu,
                             uint32_t data_type, uint32_t len, void *data_ptr);
+int iommufd_viommu_reset(IOMMUFDViommu *viommu);
 int iommufd_device_set_virtual_id(IOMMUFDDevice *idev, IOMMUFDViommu *viommu,
                                   uint32_t id_type, uint64_t id);
 void *iommufd_viommu_get_shared_page(int iommufd, uint32_t viommu_id,

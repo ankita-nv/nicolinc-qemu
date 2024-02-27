@@ -135,6 +135,25 @@ int iommufd_viommu_set_data(IOMMUFDViommu *viommu,
     return ret;
 }
 
+int iommufd_viommu_reset(IOMMUFDViommu *viommu)
+{
+    int ret, fd = viommu->iommufd->fd;
+    struct iommu_viommu_reset viommu_reset = {
+        .size = sizeof(viommu_reset),
+        .flags = 0,
+        .viommu_id = viommu->viommu_id,
+    };
+
+    ret = ioctl(fd, IOMMU_VIOMMU_RESET, &viommu_reset);
+
+    trace_iommufd_viommu_reset(fd, viommu->viommu_id, ret);
+    if (ret) {
+        ret = -errno;
+        error_report("IOMMU_VIOMMU_SET_DATA failed: %s", strerror(errno));
+    }
+    return ret;
+}
+
 int iommufd_device_set_virtual_id(IOMMUFDDevice *idev, IOMMUFDViommu *viommu,
                                   uint32_t id_type, uint64_t id)
 {
