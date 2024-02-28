@@ -2,6 +2,7 @@
  * ARM mach-virt emulation
  *
  * Copyright (c) 2013 Linaro Limited
+ * Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES
  *
  * This program is free software; you can redistribute it and/or modify it
  * under the terms and conditions of the GNU General Public License,

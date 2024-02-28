@@ -5,6 +5,7 @@
  * Copyright (C) 2008-2010  Kevin O'Connor <kevin@koconnor.net>
  * Copyright (C) 2006 Fabrice Bellard
  * Copyright (C) 2013 Red Hat Inc
+ * Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES
  *
  * Author: Michael S. Tsirkin <mst@redhat.com>
  *

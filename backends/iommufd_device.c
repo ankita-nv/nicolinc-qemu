@@ -2,6 +2,7 @@
  * QEMU abstract of Host IOMMU
  *
  * Copyright (C) 2024 Intel Corporation.
+ * Copyright (c) 2024, NVIDIA CORPORATION & AFFILIATES
  *
  * Authors: Yi Liu <yi.l.liu@intel.com>
  *          Zhenzhong Duan <zhenzhong.duan@intel.com>
