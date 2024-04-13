@@ -80,6 +80,10 @@ int iommufd_viommu_invalidate_cache(IOMMUFDBackend *be, uint32_t viommu_id,
 struct IOMMUFDVqueue *iommufd_viommu_alloc_queue(IOMMUFDViommu *viommu,
                                                  uint32_t data_type,
                                                  uint32_t len, void *data_ptr);
+void *iommufd_viommu_get_shared_page(IOMMUFDViommu *viommu,
+                                     uint32_t size, bool readonly);
+void iommufd_viommu_put_shared_page(IOMMUFDViommu *viommu,
+                                    void *page, uint32_t size);
 
 #define TYPE_HOST_IOMMU_DEVICE_IOMMUFD TYPE_HOST_IOMMU_DEVICE "-iommufd"
 OBJECT_DECLARE_TYPE(HostIOMMUDeviceIOMMUFD, HostIOMMUDeviceIOMMUFDClass,
