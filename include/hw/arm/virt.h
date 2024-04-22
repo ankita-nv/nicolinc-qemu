@@ -156,7 +156,7 @@ struct VirtMachineState {
     bool ras;
     bool mte;
     bool dtb_randomness;
-    bool cmdqv;
+    int num_cmdqvs;
     OnOffAuto acpi;
     VirtGICType gic_version;
     struct IOMMUFDBackend *iommufd;

@@ -1370,7 +1370,7 @@ static void create_cmdqv(const VirtMachineState *vms,
     char *node, *smmu_node;
     DeviceState *dev;
 
-    if (!vms->cmdqv) {
+    if (!vms->num_cmdqvs) {
         return;
     }
 
@@ -1420,7 +1420,7 @@ static void create_smmu(const VirtMachineState *vms,
         object_property_set_link(OBJECT(dev), "iommufd", OBJECT(vms->iommufd),
                                  &error_abort);
         object_property_set_bool(OBJECT(dev), "nested", true, &error_abort);
-        if (vms->cmdqv) {
+        if (vms->num_cmdqvs) {
             object_property_set_bool(OBJECT(dev), "cmdqv", true, &error_abort);
         }
     } else if (!vms->iommufd) {
@@ -2717,18 +2717,42 @@ static void virt_set_default_bus_bypass_iommu(Object *obj, bool value,
     vms->default_bus_bypass_iommu = value;
 }
 
+static int virt_get_num_cmdqvs(Error **errp)
+{
+    struct dirent *dent;
+    DIR *dir = NULL;
+    int num = 0;
+
+    dir = opendir("/sys/class/iommu");
+    if (!dir) {
+        error_setg_errno(errp, errno, "couldn't open /sys/class/iommu");
+        return errno;
+    }
+
+    while ((dent = readdir(dir))) {
+        if (!strncmp(dent->d_name, "smmu3.", 5)) {
+            num++;
+        }
+    }
+
+    return num;
+}
+
 static bool virt_get_cmdqv(Object *obj, Error **errp)
 {
     VirtMachineState *vms = VIRT_MACHINE(obj);
 
-    return vms->cmdqv;
+    return !!vms->num_cmdqvs;
 }
 
 static void virt_set_cmdqv(Object *obj, bool value, Error **errp)
 {
     VirtMachineState *vms = VIRT_MACHINE(obj);
-
-    vms->cmdqv = value;
+    if (value) {
+        vms->num_cmdqvs = virt_get_num_cmdqvs(errp);
+    } else {
+        vms->num_cmdqvs = 0;
+    }
 }
 
 static CpuInstanceProperties
@@ -3270,7 +3294,7 @@ static void virt_instance_init(Object *obj)
     vms->default_bus_bypass_iommu = false;
 
     /* Default disallows cmdqv instantiation */
-    vms->cmdqv = false;
+    vms->num_cmdqvs = 0;
 
     /* Default disallows RAS instantiation */
     vms->ras = false;
