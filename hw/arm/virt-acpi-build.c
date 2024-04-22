@@ -944,7 +944,7 @@ build_dsdt(GArray *table_data, BIOSLinker *linker, VirtMachineState *vms)
     acpi_dsdt_add_tpm(scope, vms);
 #endif
 
-    if (virt_has_smmuv3(vms) && vms->cmdqv) {
+    if (virt_has_smmuv3(vms) && vms->num_cmdqvs) {
         hwaddr size_cmdqv = memmap[VIRT_CMDQV].size;
         hwaddr base_cmdqv = memmap[VIRT_CMDQV].base;
         hwaddr base_smmu = memmap[VIRT_SMMU].base;
