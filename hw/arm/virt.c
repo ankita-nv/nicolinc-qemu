@@ -177,8 +177,8 @@ static const MemMapEntry base_memmap[] = {
     [VIRT_NVDIMM_ACPI] =        { 0x09090000, NVDIMM_ACPI_IO_LEN},
     [VIRT_PVTIME] =             { 0x090a0000, 0x00010000 },
     [VIRT_SECURE_GPIO] =        { 0x090b0000, 0x00001000 },
-    [VIRT_CMDQV] =              { 0x090c0000, 0x00050000 },
     [VIRT_MMIO] =               { 0x0a000000, 0x00000200 },
+    [VIRT_SMMU_CMDQV] =         { 0x0b000000, 0x01000000 },
     /* ...repeating for a total of NUM_VIRTIO_TRANSPORTS, each of that size */
     [VIRT_PLATFORM_BUS] =       { 0x0c000000, 0x02000000 },
     [VIRT_SECURE_MEM] =         { 0x0e000000, 0x01000000 },
@@ -223,8 +223,8 @@ static const int a15irqmap[] = {
     [VIRT_MMIO] = 16, /* ...to 16 + NUM_VIRTIO_TRANSPORTS - 1 */
     [VIRT_GIC_V2M] = 48, /* ...to 48 + NUM_GICV2M_SPIS - 1 */
     [VIRT_SMMU] = 74,    /* ...to 74 + NUM_SMMU_IRQS - 1 */
-    [VIRT_CMDQV] = 78,
     [VIRT_PLATFORM_BUS] = 112, /* ...to 112 + PLATFORM_BUS_NUM_IRQS -1 (179) */
+    [VIRT_SMMU_CMDQV] = 200, /* Keep it at the end of list */
 };
 
 static void create_randomness(MachineState *ms, const char *node)
@@ -1359,12 +1359,10 @@ static void create_pcie_irq_map(const MachineState *ms,
                            0x7           /* PCI irq */);
 }
 
-static void create_cmdqv(const VirtMachineState *vms,
+static void create_cmdqv(const VirtMachineState *vms, hwaddr smmu_base,
                          DeviceState *smmu_dev)
 {
-    hwaddr smmu_base = vms->memmap[VIRT_SMMU].base;
-    hwaddr base = vms->memmap[VIRT_CMDQV].base;
-    hwaddr size = vms->memmap[VIRT_CMDQV].size;
+    hwaddr base = smmu_base + VIRT_SMMU_SIZE;
     const char compat[] = "tegra241,cmdqv";
     MachineState *ms = MACHINE(vms);
     char *node, *smmu_node;
@@ -1385,7 +1383,8 @@ static void create_cmdqv(const VirtMachineState *vms,
     node = g_strdup_printf("/cmdqv@%" PRIx64, base);
     qemu_fdt_add_subnode(ms->fdt, node);
     qemu_fdt_setprop(ms->fdt, node, "compatible", compat, sizeof(compat));
-    qemu_fdt_setprop_sized_cells(ms->fdt, node, "reg", 2, base, 2, size);
+    qemu_fdt_setprop_sized_cells(ms->fdt, node, "reg", 2, base, 2,
+                                 VIRT_CMDQV_SIZE);
 
     smmu_node = g_strdup_printf("/smmuv3@%" PRIx64, smmu_base);
     qemu_fdt_setprop_phandle(ms->fdt, node, "smmu", smmu_node);
@@ -1394,21 +1393,19 @@ static void create_cmdqv(const VirtMachineState *vms,
     g_free(node);
 }
 
-static void create_smmu(const VirtMachineState *vms,
-                        PCIBus *bus)
+static DeviceState *_create_smmu(const VirtMachineState *vms, PCIBus *bus,
+                                 hwaddr base, hwaddr size, int irq,
+                                 uint32_t smmu_phandle)
 {
     char *node;
     const char compat[] = "arm,smmu-v3";
-    int irq =  vms->irqmap[VIRT_SMMU];
     int i;
-    hwaddr base = vms->memmap[VIRT_SMMU].base;
-    hwaddr size = vms->memmap[VIRT_SMMU].size;
     const char irq_names[] = "eventq\0priq\0cmdq-sync\0gerror";
     DeviceState *dev;
     MachineState *ms = MACHINE(vms);
 
-    if (!virt_has_smmuv3(vms) || !vms->iommu_phandle) {
-        return;
+    if (!virt_has_smmuv3(vms) || !smmu_phandle) {
+        return NULL;
     }
 
     dev = qdev_new(TYPE_ARM_SMMUV3);
@@ -1451,11 +1448,32 @@ static void create_smmu(const VirtMachineState *vms,
 
     qemu_fdt_setprop_cell(ms->fdt, node, "#iommu-cells", 1);
 
-    qemu_fdt_setprop_cell(ms->fdt, node, "phandle", vms->iommu_phandle);
+    qemu_fdt_setprop_cell(ms->fdt, node, "phandle", smmu_phandle);
     g_free(node);
 
-    create_cmdqv(vms, dev);
-    return;
+    return dev;
+}
+
+static DeviceState *create_smmu(const VirtMachineState *vms, PCIBus *bus)
+{
+    hwaddr base = vms->memmap[VIRT_SMMU].base;
+    hwaddr size = vms->memmap[VIRT_SMMU].size;
+    int irq = vms->irqmap[VIRT_SMMU];
+
+    return _create_smmu(vms, bus, base, size, irq, vms->iommu_phandle);
+}
+
+static DeviceState *create_smmu_cmdqv(const VirtMachineState *vms, PCIBus *bus,
+                                      int i)
+{
+    hwaddr base = vms->memmap[VIRT_SMMU_CMDQV].base + i * VIRT_SMMU_CMDQV_SIZE;
+    int irq = vms->irqmap[VIRT_SMMU] + i * NUM_SMMU_CMDQV_IRQS;
+    hwaddr size = vms->memmap[VIRT_SMMU].size;
+    DeviceState *dev;
+
+    dev = _create_smmu(vms, bus, base, size, irq, vms->smmu_cmdqv_phandle[i]);
+    create_cmdqv(vms, base, dev);
+    return dev;
 }
 
 static void create_virtio_iommu_dt_bindings(VirtMachineState *vms)
@@ -1482,6 +1500,41 @@ static void create_virtio_iommu_dt_bindings(VirtMachineState *vms)
     qemu_fdt_setprop_cells(ms->fdt, vms->pciehb_nodename, "iommu-map",
                            0x0, vms->iommu_phandle, 0x0, bdf,
                            bdf + 1, vms->iommu_phandle, bdf + 1, 0xffff - bdf);
+}
+
+static PCIBus *create_host_bridges(VirtMachineState *vms, int pxb_idx, int idx)
+{
+    char *name_pxb = g_strdup_printf("pcie.%d", pxb_idx);
+    char *name_port = g_strdup_printf("pcie.%d", idx + 1);
+    PCIBus *bus = vms->bus;
+    DeviceState *dev;
+
+    /* Create an expander bridge */
+    dev = qdev_new("pxb-pcie");
+    qdev_set_id(dev, name_pxb, &error_fatal);
+    qdev_prop_set_uint8(dev, "bus_nr", pxb_idx);
+    qdev_prop_set_uint16(dev, "numa_node", idx);
+    qdev_realize_and_unref(dev, BUS(bus), &error_fatal);
+    g_free(name_pxb);
+
+    /* Get the pxb bus */
+    QLIST_FOREACH(bus, &bus->child, sibling) {
+        if (pci_bus_num(bus) == pxb_idx) {
+            break;
+        }
+    }
+    assert(bus && pci_bus_num(bus) == pxb_idx);
+
+    /* Create a root port */
+    dev = qdev_new("pcie-root-port");
+    qdev_set_id(dev, name_port, &error_fatal);
+    qdev_prop_set_uint32(dev, "slot", idx);
+    qdev_prop_set_uint64(dev, "io-reserve", 0);
+    qdev_realize_and_unref(dev, BUS(bus), &error_fatal);
+    g_free(name_port);
+
+    /* Return the pxb bus */
+    return bus;
 }
 
 static void create_pcie(VirtMachineState *vms)
@@ -1552,7 +1605,7 @@ static void create_pcie(VirtMachineState *vms)
     }
 
     pci = PCI_HOST_BRIDGE(dev);
-    pci->bypass_iommu = vms->default_bus_bypass_iommu;
+    pci->bypass_iommu = vms->default_bus_bypass_iommu || !!vms->num_cmdqvs;
     vms->bus = pci->bus;
     if (vms->bus) {
         pci_init_nic_devices(pci->bus, mc->default_nic);
@@ -1598,7 +1651,27 @@ static void create_pcie(VirtMachineState *vms)
     qemu_fdt_setprop_cell(ms->fdt, nodename, "#interrupt-cells", 1);
     create_pcie_irq_map(ms, vms->gic_phandle, irq, nodename);
 
-    if (vms->iommu) {
+    if (vms->num_cmdqvs) {
+        /* VIRT_SMMU_CMDQV must hold all cmdqv-backed SMMUs */
+        assert(vms->num_cmdqvs <= vms->memmap[VIRT_SMMU_CMDQV].size /
+                                  VIRT_SMMU_CMDQV_SIZE);
+        /* cmdqv is only supported with nested-smmuv3 */
+        assert(vms->iommu == VIRT_IOMMU_NESTED_SMMUV3);
+        /* There must be enough numa nodes for cmdqv-backed PCI host bridges */
+        assert(vms->num_cmdqvs <= ms->numa_state->num_nodes);
+
+        vms->smmu_cmdqv_phandle = g_new0(uint32_t, vms->num_cmdqvs);
+
+        for (i = 0; i < vms->num_cmdqvs; i++) {
+            PCIBus *bus = create_host_bridges(vms, 128 + i * 4, i);
+
+            vms->smmu_cmdqv_phandle[i] = qemu_fdt_alloc_phandle(ms->fdt);
+
+            create_smmu_cmdqv(vms, bus, i);
+            qemu_fdt_setprop_cells(ms->fdt, nodename, "iommu-map",
+                                   0x0, vms->smmu_cmdqv_phandle[i], 0x0, 0x10000);
+        }
+    } else if (vms->iommu) {
         vms->iommu_phandle = qemu_fdt_alloc_phandle(ms->fdt);
 
         switch (vms->iommu) {
