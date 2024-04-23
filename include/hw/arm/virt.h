@@ -46,6 +46,7 @@ struct IOMMUFDBackend;
 #define NUM_GICV2M_SPIS       64
 #define NUM_VIRTIO_TRANSPORTS 32
 #define NUM_SMMU_IRQS          4
+#define NUM_SMMU_CMDQV_IRQS    (NUM_SMMU_IRQS + 1)
 
 /* See Linux kernel arch/arm64/include/asm/pvclock-abi.h */
 #define PVTIME_SIZE_PER_CPU 64
@@ -62,7 +63,7 @@ enum {
     VIRT_GIC_ITS,
     VIRT_GIC_REDIST,
     VIRT_SMMU,
-    VIRT_CMDQV,
+    VIRT_SMMU_CMDQV,
     VIRT_UART,
     VIRT_MMIO,
     VIRT_RTC,
@@ -173,6 +174,7 @@ struct VirtMachineState {
     uint32_t gic_phandle;
     uint32_t msi_phandle;
     uint32_t iommu_phandle;
+    uint32_t *smmu_cmdqv_phandle;
     int psci_conduit;
     hwaddr highest_gpa;
     DeviceState *gic;
@@ -221,5 +223,10 @@ static inline bool virt_has_smmuv3(const VirtMachineState *vms)
     return vms->iommu == VIRT_IOMMU_SMMUV3 ||
            vms->iommu == VIRT_IOMMU_NESTED_SMMUV3;
 }
+
+/* MMIO region size for a pair of SMMUv3 + CMDQV */
+#define VIRT_SMMU_SIZE       (0x20000)
+#define VIRT_CMDQV_SIZE      (0x50000)
+#define VIRT_SMMU_CMDQV_SIZE (VIRT_SMMU_SIZE + VIRT_CMDQV_SIZE)
 
 #endif /* QEMU_ARM_VIRT_H */
