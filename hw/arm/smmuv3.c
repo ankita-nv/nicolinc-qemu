@@ -1268,6 +1268,16 @@ static void smmuv3_install_nested_ste(SMMUDevice *sdev, int sid)
         return;
     }
 
+    if (!sdev->sid) {
+        ret = smmu_iommu_dev_set_virtual_id(sdev, sid);
+        if (ret) {
+            error_report("failed to set Virtual id %d", sid);
+            smmuv3_record_event(s, &event);
+            return;
+        }
+        sdev->sid = sid;
+    }
+
     ret = smmu_find_ste(sdev->smmu, sid, &ste, &event);
     if (ret) {
         error_report("Unable to find Stream Table Entry: %d", ret);
