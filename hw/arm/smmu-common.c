@@ -731,7 +731,6 @@ static int smmu_dev_set_iommu_device(PCIBus *bus, void *opaque, int devfn,
     SMMUState *s = opaque;
     SMMUPciBus *sbus = smmu_get_sbus(s, bus);
     SMMUDevice *sdev = smmu_get_sdev(s, sbus, bus, devfn);
-    int ret;
 
     if (!s->iommufd) {
         return -ENOENT;
@@ -763,12 +762,6 @@ static int smmu_dev_set_iommu_device(PCIBus *bus, void *opaque, int devfn,
     sdev->s2_hwpt = s2_hwpt;
     QLIST_INSERT_HEAD(&s2_hwpt->device_list, sdev, next);
     trace_smmu_set_iommu_device(devfn, smmu_get_sid(sdev));
-
-    ret = smmu_iommu_dev_set_virtual_id(sdev, smmu_get_sid(sdev));
-    if (ret) {
-        error_report("failed to set Virtual id %d", smmu_get_sid(sdev));
-        return ret;
-    }
 
     return 0;
 }
