@@ -764,10 +764,13 @@ static int smmu_dev_set_iommu_device(PCIBus *bus, void *opaque, int devfn,
     QLIST_INSERT_HEAD(&s2_hwpt->device_list, sdev, next);
     trace_smmu_set_iommu_device(devfn, smmu_get_sid(sdev));
 
-    ret = smmu_iommu_dev_set_virtual_id(sdev, smmu_get_sid(sdev));
-    if (ret) {
-        error_report("failed to set Virtual id %d", smmu_get_sid(sdev));
-        return ret;
+    if (smmu_get_sid(sdev)) {
+        ret = smmu_iommu_dev_set_virtual_id(sdev, smmu_get_sid(sdev));
+        if (ret) {
+            error_report("failed to set Virtual id %d", smmu_get_sid(sdev));
+            return ret;
+        }
+        sdev->sid = smmu_get_sid(sdev);
     }
 
     return 0;

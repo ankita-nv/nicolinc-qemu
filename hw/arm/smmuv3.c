@@ -1311,6 +1311,14 @@ static void smmuv3_install_nested_ste(SMMUDevice *sdev, int sid)
 
     trace_smmuv3_install_nested_ste(sid, sdev->s1_hwpt->asid,
                                     nested_data.ste[1], nested_data.ste[0]);
+    if (!sdev->sid) {
+        ret = smmu_iommu_dev_set_virtual_id(sdev, smmu_get_sid(sdev));
+        if (ret) {
+            error_report("failed to set Virtual id %d", smmu_get_sid(sdev));
+            return;
+        }
+        sdev->sid = smmu_get_sid(sdev);
+    }
 #endif
 }
 
