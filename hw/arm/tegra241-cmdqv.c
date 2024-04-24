@@ -123,33 +123,45 @@ static uint64_t tegra241_cmdqv_read_vcmdq(Tegra241CMDQV *s, hwaddr offset, int i
 
     switch (offset) {
     case A_VCMDQ0_CONS_INDX:
-        ptr = (uint32_t *)(s->vcmdq_page0 + 0x80 * index + offset - 0x10000);
-        s->vcmdq_cons_indx[index] = *ptr;
+        if (s->vcmdq_page0) {
+            ptr = (uint32_t *)(s->vcmdq_page0 + 0x80 * index + offset - 0x10000);
+            s->vcmdq_cons_indx[index] = *ptr;
+        }
         return s->vcmdq_cons_indx[index];
 
     case A_VCMDQ0_PROD_INDX:
-        ptr = (uint32_t *)(s->vcmdq_page0 + 0x80 * index + offset - 0x10000);
-        s->vcmdq_prod_indx[index] = *ptr;
+        if (s->vcmdq_page0) {
+            ptr = (uint32_t *)(s->vcmdq_page0 + 0x80 * index + offset - 0x10000);
+            s->vcmdq_prod_indx[index] = *ptr;
+        }
         return s->vcmdq_prod_indx[index];
 
     case A_VCMDQ0_CONFIG:
-        ptr = (uint32_t *)(s->vcmdq_page0 + 0x80 * index + offset - 0x10000);
-        s->vcmdq_config[index] = *ptr;
+        if (s->vcmdq_page0) {
+            ptr = (uint32_t *)(s->vcmdq_page0 + 0x80 * index + offset - 0x10000);
+            s->vcmdq_config[index] = *ptr;
+        }
         return s->vcmdq_config[index];
 
     case A_VCMDQ0_STATUS:
-        ptr = (uint32_t *)(s->vcmdq_page0 + 0x80 * index + offset - 0x10000);
-        s->vcmdq_status[index] = *ptr;
+        if (s->vcmdq_page0) {
+            ptr = (uint32_t *)(s->vcmdq_page0 + 0x80 * index + offset - 0x10000);
+            s->vcmdq_status[index] = *ptr;
+        }
         return s->vcmdq_status[index];
 
     case A_VCMDQ0_GERROR:
-        ptr = (uint32_t *)(s->vcmdq_page0 + 0x80 * index + offset - 0x10000);
-        s->vcmdq_gerror[index] = *ptr;
+        if (s->vcmdq_page0) {
+            ptr = (uint32_t *)(s->vcmdq_page0 + 0x80 * index + offset - 0x10000);
+            s->vcmdq_gerror[index] = *ptr;
+        }
         return s->vcmdq_gerror[index];
 
     case A_VCMDQ0_GERRORN:
-        ptr = (uint32_t *)(s->vcmdq_page0 + 0x80 * index + offset - 0x10000);
-        s->vcmdq_gerrorn[index] = *ptr;
+        if (s->vcmdq_page0) {
+            ptr = (uint32_t *)(s->vcmdq_page0 + 0x80 * index + offset - 0x10000);
+            s->vcmdq_gerrorn[index] = *ptr;
+        }
         return s->vcmdq_gerrorn[index];
 
     case A_VCMDQ0_BASE_L:
@@ -172,7 +184,16 @@ static uint64_t tegra241_cmdqv_read_vcmdq(Tegra241CMDQV *s, hwaddr offset, int i
 
 static int tegra241_cmdqv_init_vcmdq_page0(Tegra241CMDQV *s)
 {
+    SMMUState *bs = ARM_SMMU(s->smmu_dev);
     char *name;
+
+    if (!bs->viommu) {
+        return 0;
+    }
+
+    if (!s->viommu) {
+        s->viommu = bs->viommu;
+    }
 
     s->vcmdq_page0 = smmu_iommu_get_shared_page(ARM_SMMU(s->smmu_dev),
                                                 VCMDQ_REG_PAGE_SIZE, false);
@@ -281,7 +302,7 @@ static void tegra241_cmdqv_write_vintf(Tegra241CMDQV *s, hwaddr offset,
         value &= ~R_VINTF0_CONFIG_HYP_OWN_MASK;
 
         s->vintf_config = value;
-	if (value & R_VINTF0_CONFIG_ENABLE_MASK) {
+        if (s->viommu && (value & R_VINTF0_CONFIG_ENABLE_MASK)) {
             s->vintf_status = R_VINTF0_STATUS_ENABLE_OK_MASK;
         } else {
             s->vintf_status &= ~R_VINTF0_STATUS_ENABLE_OK_MASK;
@@ -344,23 +365,35 @@ static void tegra241_cmdqv_write_vcmdq(Tegra241CMDQV *s, hwaddr offset,
 
     switch (offset) {
     case A_VCMDQ0_CONS_INDX:
-        ptr = (uint32_t *)(s->vcmdq_page0 + 0x80 * index + offset - 0x10000);
-        *ptr = s->vcmdq_cons_indx[index] = value;
+        if (s->vcmdq_page0) {
+            ptr = (uint32_t *)(s->vcmdq_page0 + 0x80 * index + offset - 0x10000);
+            *ptr = value;
+        }
+        s->vcmdq_cons_indx[index] = value;
         return;
 
     case A_VCMDQ0_PROD_INDX:
-        ptr = (uint32_t *)(s->vcmdq_page0 + 0x80 * index + offset - 0x10000);
-        *ptr = s->vcmdq_prod_indx[index] = value;
+        if (s->vcmdq_page0) {
+            ptr = (uint32_t *)(s->vcmdq_page0 + 0x80 * index + offset - 0x10000);
+            *ptr = value;
+        }
+        s->vcmdq_prod_indx[index] = value;
         return;
 
     case A_VCMDQ0_CONFIG:
-        ptr = (uint32_t *)(s->vcmdq_page0 + 0x80 * index + offset - 0x10000);
-        *ptr = s->vcmdq_config[index] = value;
+        if (s->vcmdq_page0) {
+            ptr = (uint32_t *)(s->vcmdq_page0 + 0x80 * index + offset - 0x10000);
+            *ptr = value;
+        }
+        s->vcmdq_config[index] = value;
         return;
 
     case A_VCMDQ0_GERRORN:
-        ptr = (uint32_t *)(s->vcmdq_page0 + 0x80 * index + offset - 0x10000);
-        *ptr = s->vcmdq_gerrorn[index] = value;
+        if (s->vcmdq_page0) {
+            ptr = (uint32_t *)(s->vcmdq_page0 + 0x80 * index + offset - 0x10000);
+            *ptr = value;
+        }
+        s->vcmdq_gerrorn[index] = value;
         return;
 
     case A_VCMDQ0_BASE_L:
