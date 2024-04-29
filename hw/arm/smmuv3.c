@@ -1275,17 +1275,17 @@ static void smmuv3_install_nested_ste(SMMUDevice *sdev, int sid)
         return;
     }
 
-    ret = smmu_get_cd(s, &ste, 0 /* ssid */, &cd, &event);
-    if (ret) {
-        error_report("Unable to find Context Descriptor: %d", ret);
-        smmuv3_record_event(s, &event);
-        return;
-    }
-
     config = STE_CONFIG(&ste);
     if (!STE_VALID(&ste) || !STE_CFG_S1_ENABLED(config)) {
         smmu_dev_uninstall_nested_ste(sdev);
         smmuv3_flush_config(sdev);
+        return;
+    }
+
+    ret = smmu_get_cd(s, &ste, 0 /* ssid */, &cd, &event);
+    if (ret) {
+        error_report("Unable to find Context Descriptor: %d", ret);
+        smmuv3_record_event(s, &event);
         return;
     }
 
