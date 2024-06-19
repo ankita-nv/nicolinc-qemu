@@ -50,6 +50,9 @@ struct IOMMUFDBackend;
 /* See Linux kernel arch/arm64/include/asm/pvclock-abi.h */
 #define PVTIME_SIZE_PER_CPU 64
 
+/* MMIO region size for SMMUv3 */
+#define SMMU_IO_LEN         (0x20000)
+
 enum {
     VIRT_FLASH,
     VIRT_MEM,
