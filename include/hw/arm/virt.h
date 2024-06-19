@@ -137,6 +137,12 @@ struct VirtMachineClass {
     bool no_ns_el2_virt_timer_irq;
 };
 
+typedef struct VirtNestedSmmu {
+    int index;
+    char *smmu_node;
+    QLIST_ENTRY(VirtNestedSmmu) next;
+} VirtNestedSmmu;
+
 struct VirtMachineState {
     MachineState parent;
     Notifier machine_done;
@@ -155,6 +161,7 @@ struct VirtMachineState {
     bool ras;
     bool mte;
     bool dtb_randomness;
+    int num_nested_smmus;
     OnOffAuto acpi;
     VirtGICType gic_version;
     struct IOMMUFDBackend *iommufd;
@@ -180,6 +187,7 @@ struct VirtMachineState {
     char *oem_id;
     char *oem_table_id;
     bool ns_el2_virt_timer_irq;
+    QLIST_HEAD(, VirtNestedSmmu) nested_smmu_list;
 };
 
 #define VIRT_ECAM_ID(high) (high ? VIRT_HIGH_PCIE_ECAM : VIRT_PCIE_ECAM)
