@@ -77,6 +77,15 @@ SMMUTLBEntry *smmu_iotlb_lookup(SMMUState *bs, SMMUTransCfg *cfg,
     uint8_t level = 4 - (inputsize - 4) / stride;
     SMMUTLBEntry *entry = NULL;
 
+    /*
+     * FIXME missing an iommu notifier for emulated cache invalidation when the
+     * SMMU is configured as a nested one. So, bypass iotlb lookup and walk the
+     * page table through directly.
+     */
+    if (bs->nested) {
+        NULL;
+    }
+
     while (level <= 3) {
         uint64_t subpage_size = 1ULL << level_shift(level, tt->granule_sz);
         uint64_t mask = subpage_size - 1;
@@ -111,6 +120,14 @@ void smmu_iotlb_insert(SMMUState *bs, SMMUTransCfg *cfg, SMMUTLBEntry *new)
 {
     SMMUIOTLBKey *key = g_new0(SMMUIOTLBKey, 1);
     uint8_t tg = (new->granule - 10) / 2;
+
+    /*
+     * FIXME missing an iommu notifier for emulated cache invalidation when the
+     * SMMU is configured as a nested one. So, bypass iotlb insertion.
+     */
+    if (bs->nested) {
+        return;
+    }
 
     if (g_hash_table_size(bs->iotlb) >= SMMU_IOTLB_MAX_SIZE) {
         smmu_iotlb_inv_all(bs);
