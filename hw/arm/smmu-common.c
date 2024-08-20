@@ -939,6 +939,7 @@ static bool smmu_dev_attach_viommu(SMMUDevice *sdev,
     }
 
     viommu = g_new0(SMMUViommu, 1);
+    viommu->smmu = s;
 
     viommu->core = iommufd_backend_alloc_viommu(idev->iommufd, idev->devid,
                                                 IOMMU_VIOMMU_TYPE_ARM_SMMUV3,
@@ -948,13 +949,19 @@ static bool smmu_dev_attach_viommu(SMMUDevice *sdev,
         goto free_viommu;
     }
 
+    viommu->veventq = iommufd_viommu_alloc_eventq(viommu->core,
+                                                  IOMMU_VEVENTQ_TYPE_ARM_SMMUV3);
+    if (!viommu->veventq) {
+        error_report("failed to allocate SMMUV3 veventq, errors will be ignored");
+    }
+
     if (!iommufd_backend_alloc_hwpt(idev->iommufd, idev->devid,
                                     viommu->core->viommu_id, 0,
                                     IOMMU_HWPT_DATA_ARM_SMMUV3,
                                     sizeof(abort_data), &abort_data,
                                     &viommu->abort_hwpt_id, errp)) {
         error_setg(errp, "failed to allocate an abort pagetable");
-        goto free_viommu_core;
+        goto free_veventq;
     }
 
     if (!iommufd_backend_alloc_hwpt(idev->iommufd, idev->devid,
@@ -981,13 +988,17 @@ static bool smmu_dev_attach_viommu(SMMUDevice *sdev,
     viommu->s2_hwpt = s2_hwpt;
 
     s->viommu = viommu;
+    if (viommu->veventq) {
+        qemu_thread_create(&s->event_thread_id, "irq/event",
+                           smmuv3_nested_event_thread, viommu, QEMU_THREAD_JOINABLE);
+    }
     return true;
 
 free_bypass_hwpt:
     iommufd_backend_free_id(idev->iommufd, viommu->bypass_hwpt_id);
 free_abort_hwpt:
     iommufd_backend_free_id(idev->iommufd, viommu->abort_hwpt_id);
-free_viommu_core:
+free_veventq:
     iommufd_backend_free_id(idev->iommufd, viommu->core->viommu_id);
     g_free(viommu->core);
 free_viommu:
@@ -1076,6 +1087,9 @@ static void smmu_dev_unset_iommu_device(PCIBus *bus, void *opaque, int devfn)
     }
 
     if (QLIST_EMPTY(&viommu->device_list)) {
+        qemu_thread_join(&s->event_thread_id);
+        if (viommu->veventq)
+            iommufd_backend_free_id(viommu->iommufd, viommu->veventq->veventq_id);
         iommufd_backend_free_id(viommu->iommufd, viommu->bypass_hwpt_id);
         iommufd_backend_free_id(viommu->iommufd, viommu->abort_hwpt_id);
         iommufd_backend_free_id(viommu->iommufd, viommu->core->viommu_id);
