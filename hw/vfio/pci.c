@@ -403,6 +403,7 @@ static int vfio_enable_vectors(VFIOPCIDevice *vdev, bool msix)
 {
     struct vfio_irq_set *irq_set;
     int ret = 0, i, argsz;
+    uint64_t *msi_iovas;
     int32_t *fds;
 
     /*
@@ -422,6 +423,33 @@ static int vfio_enable_vectors(VFIOPCIDevice *vdev, bool msix)
         }
     }
 
+    /* VFIO_IRQ_SET_ACTION_PREPARE */
+    argsz = sizeof(*irq_set) + (vdev->nr_vectors * sizeof(*msi_iovas));
+
+    irq_set = g_malloc0(argsz);
+    irq_set->argsz = argsz;
+    irq_set->flags = VFIO_IRQ_SET_DATA_MSI_IOVA | VFIO_IRQ_SET_ACTION_PREPARE;
+    irq_set->index = msix ? VFIO_PCI_MSIX_IRQ_INDEX : VFIO_PCI_MSI_IRQ_INDEX;
+    irq_set->start = 0;
+    irq_set->count = vdev->nr_vectors;
+    msi_iovas = (uint64_t *)&irq_set->data;
+
+    for (i = 0; i < vdev->nr_vectors; i++) {
+        MSIMessage msg = {0, 0};
+
+        msg = pci_get_msi_message(&vdev->pdev, i);
+        msi_iovas[i] = msg.address;
+        trace_vfio_msix_prepare_iova(vdev->vbasedev.name, i, msg.address);
+    }
+
+    ret = ioctl(vdev->vbasedev.fd, VFIO_DEVICE_SET_IRQS, irq_set);
+
+    g_free(irq_set);
+
+    if (ret)
+	    return ret;
+
+    /* VFIO_IRQ_SET_ACTION_TRIGGER */
     argsz = sizeof(*irq_set) + (vdev->nr_vectors * sizeof(*fds));
 
     irq_set = g_malloc0(argsz);
@@ -789,10 +817,34 @@ retry:
     trace_vfio_msi_enable(vdev->vbasedev.name, vdev->nr_vectors);
 }
 
+static void vfio_device_unprepare_msi(VFIOPCIDevice *vdev)
+{
+    struct vfio_irq_set *irq_set;
+    uint64_t *msi_iovas;
+    int ret, i, argsz;
+
+    /* VFIO_IRQ_SET_ACTION_PREPARE */
+    argsz = sizeof(*irq_set) + (vdev->nr_vectors * sizeof(*msi_iovas));
+    irq_set = g_malloc0(argsz);
+    irq_set->argsz = argsz;
+    irq_set->flags = VFIO_IRQ_SET_DATA_NONE | VFIO_IRQ_SET_ACTION_PREPARE;
+    irq_set->index = VFIO_PCI_MSIX_IRQ_INDEX;
+    irq_set->start = 0;
+    irq_set->count = vdev->nr_vectors;
+    msi_iovas = (uint64_t *)&irq_set->data;
+    for (i = 0; i < vdev->nr_vectors; i++) {
+        msi_iovas[i] = 0;
+    }
+    ret = ioctl(vdev->vbasedev.fd, VFIO_DEVICE_SET_IRQS, irq_set);
+    trace_vfio_msix_unprepare_iova(vdev->vbasedev.name, ret);
+    g_free(irq_set);
+}
+
 static void vfio_msi_disable_common(VFIOPCIDevice *vdev)
 {
     int i;
 
+    vfio_device_unprepare_msi(vdev);
     for (i = 0; i < vdev->nr_vectors; i++) {
         VFIOMSIVector *vector = &vdev->msi_vectors[i];
         if (vdev->msi_vectors[i].use) {
