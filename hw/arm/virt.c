@@ -1430,8 +1430,10 @@ static DeviceState *_create_smmu(const VirtMachineState *vms, PCIBus *bus,
                              &error_abort);
     if (vms->iommu == VIRT_IOMMU_NESTED_SMMUV3) {
         g_assert(vms->iommufd);
-        object_property_set_link(OBJECT(dev), "iommufd", OBJECT(vms->iommufd),
-                                 &error_abort);
+        g_assert(iommufd_backend_connect(vms->iommufd, NULL));
+        g_assert(iommufd_backend_set_sw_msi_size(vms->iommufd, 0, 1, NULL));
+        g_assert(iommufd_backend_set_sw_msi_start(vms->iommufd, 0,
+                 IOMMUFD_SW_MSI_BASE, NULL));
         object_property_set_bool(OBJECT(dev), "nested", true, &error_abort);
     }
     sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);

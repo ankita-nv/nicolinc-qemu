@@ -169,6 +169,7 @@ struct VirtMachineState {
     int num_nested_smmus;
     OnOffAuto acpi;
     VirtGICType gic_version;
+#define IOMMUFD_SW_MSI_BASE 0x09000000
     IOMMUFDBackend *iommufd;
     VirtIOMMUType iommu;
     bool default_bus_bypass_iommu;
