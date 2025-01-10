@@ -290,6 +290,44 @@ bool iommufd_backend_get_dirty_bitmap(IOMMUFDBackend *be,
     return true;
 }
 
+bool iommufd_backend_set_sw_msi_start(IOMMUFDBackend *be, uint32_t devid,
+                                      uint64_t sw_msi_start, Error **errp)
+{
+    struct iommu_option option = {
+        .size = sizeof(option),
+        .object_id = devid,
+        .option_id = IOMMU_OPTION_SW_MSI_START,
+        .op = IOMMU_OPTION_OP_SET,
+        .val64 = sw_msi_start,
+    };
+
+    if (ioctl(be->fd, IOMMU_OPTION, &option)) {
+        error_setg_errno(errp, errno, "Failed to set sw_msi_start");
+        return false;
+    }
+
+    return true;
+}
+
+bool iommufd_backend_set_sw_msi_size(IOMMUFDBackend *be, uint32_t devid,
+                                     uint64_t sw_msi_size, Error **errp)
+{
+    struct iommu_option option = {
+        .size = sizeof(option),
+        .object_id = devid,
+        .option_id = IOMMU_OPTION_SW_MSI_SIZE,
+        .op = IOMMU_OPTION_OP_SET,
+        .val64 = sw_msi_size,
+    };
+
+    if (ioctl(be->fd, IOMMU_OPTION, &option)) {
+        error_setg_errno(errp, errno, "Failed to set sw_msi_size");
+        return false;
+    }
+
+    return true;
+}
+
 bool iommufd_backend_get_device_info(IOMMUFDBackend *be, uint32_t devid,
                                      uint32_t *type, void *data, uint32_t len,
                                      uint64_t *caps, Error **errp)
