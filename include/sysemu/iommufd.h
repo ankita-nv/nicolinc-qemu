@@ -53,6 +53,10 @@ int iommufd_backend_map_dma(IOMMUFDBackend *be, uint32_t ioas_id, hwaddr iova,
                             ram_addr_t size, void *vaddr, bool readonly);
 int iommufd_backend_unmap_dma(IOMMUFDBackend *be, uint32_t ioas_id,
                               hwaddr iova, ram_addr_t size);
+bool iommufd_backend_set_sw_msi_start(IOMMUFDBackend *be, uint32_t devid,
+                                      uint64_t sw_msi_start, Error **errp);
+bool iommufd_backend_set_sw_msi_size(IOMMUFDBackend *be, uint32_t devid,
+                                     uint64_t sw_msi_size, Error **errp);
 bool iommufd_backend_get_device_info(IOMMUFDBackend *be, uint32_t devid,
                                      uint32_t *type, void *data, uint32_t len,
                                      uint64_t *caps, Error **errp);
