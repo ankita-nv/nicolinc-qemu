@@ -132,6 +132,11 @@ static void acpi_dsdt_add_pci(Aml *scope, const MemMapEntry *memmap,
         .bus    = vms->bus,
     };
 
+    /* Nested SMMU requires _DSM for PreservingPCI Boot Configurations */
+    if (vms->iommu == VIRT_IOMMU_NESTED_SMMUV3) {
+        cfg.preserve_config = true;
+    }
+
     if (vms->highmem_mmio) {
         cfg.mmio64 = memmap[VIRT_HIGH_PCIE_MMIO];
     }
