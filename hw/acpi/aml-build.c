@@ -1948,8 +1948,9 @@ static void build_append_srat_pci_device_handle(GArray *table_data,
     /* PCI segment number */
     build_append_int_noprefix(table_data, segment, 2);
     /* PCI Bus Device Function */
-    build_append_int_noprefix(table_data, bus, 1);
-    build_append_int_noprefix(table_data, devfn, 1);
+    //build_append_int_noprefix(table_data, bus, 1);
+    //build_append_int_noprefix(table_data, devfn, 1);
+    build_append_int_noprefix(table_data, PCI_BUILD_BDF(bus, devfn), 2);
     /* Reserved */
     build_append_int_noprefix(table_data, 0, 12);
 }
