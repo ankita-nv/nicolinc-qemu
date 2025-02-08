@@ -934,6 +934,13 @@ static bool smmu_dev_attach_viommu(SMMUDevice *sdev,
         return false;
     }
 
+    /* Must detach the device first to set SW_MSI options */
+    host_iommu_device_iommufd_detach_hwpt(idev, errp);
+    g_assert(iommufd_backend_set_sw_msi_start(idev->iommufd, idev->devid,
+                                              0x07000000, NULL));
+    g_assert(iommufd_backend_set_sw_msi_size(idev->iommufd, idev->devid, 1,
+                                             NULL));
+
     /* Attach to S2 for MSI cookie */
     if (!host_iommu_device_iommufd_attach_hwpt(idev, s2_hwpt_id, errp)) {
         error_report("failed to attach stage-2 HW pagetable");
