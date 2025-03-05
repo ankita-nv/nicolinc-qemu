@@ -907,6 +907,8 @@ static AddressSpace *smmu_find_add_as(PCIBus *bus, void *opaque, int devfn)
     }
 }
 
+static SMMUS2Hwpt *s2_hwpt;
+
 static bool smmu_dev_attach_viommu(SMMUDevice *sdev,
                                    HostIOMMUDeviceIOMMUFD *idev, Error **errp)
 {
@@ -917,27 +919,22 @@ static bool smmu_dev_attach_viommu(SMMUDevice *sdev,
         .ste = { 0x1ULL, 0x0ULL },
     };
     SMMUState *s = sdev->smmu;
-    SMMUS2Hwpt *s2_hwpt;
     SMMUViommu *viommu;
     uint32_t s2_hwpt_id;
 
     if (s->viommu) {
         return host_iommu_device_iommufd_attach_hwpt(
-                       idev, s->viommu->s2_hwpt->hwpt_id, errp);
+                       idev, s->viommu->bypass_hwpt_id, errp);
     }
 
-    if (!iommufd_backend_alloc_hwpt(idev->iommufd, idev->devid, idev->ioas_id,
+    if (s2_hwpt) {
+        s2_hwpt_id = s2_hwpt->hwpt_id;
+    } else if (!iommufd_backend_alloc_hwpt(idev->iommufd, idev->devid, idev->ioas_id,
                                     IOMMU_HWPT_ALLOC_NEST_PARENT,
                                     IOMMU_HWPT_DATA_NONE, 0, NULL,
                                     &s2_hwpt_id, errp)) {
         error_report("failed to allocate an S2 hwpt");
         return false;
-    }
-
-    /* Attach to S2 for MSI cookie */
-    if (!host_iommu_device_iommufd_attach_hwpt(idev, s2_hwpt_id, errp)) {
-        error_report("failed to attach stage-2 HW pagetable");
-        goto free_s2_hwpt;
     }
 
     viommu = g_new0(SMMUViommu, 1);
@@ -974,10 +971,12 @@ static bool smmu_dev_attach_viommu(SMMUDevice *sdev,
         goto free_bypass_hwpt;
     }
 
-    s2_hwpt = g_new0(SMMUS2Hwpt, 1);
-    s2_hwpt->iommufd = idev->iommufd;
-    s2_hwpt->hwpt_id = s2_hwpt_id;
-    s2_hwpt->ioas_id = idev->ioas_id;
+    if (!s2_hwpt) {
+        s2_hwpt = g_new0(SMMUS2Hwpt, 1);
+        s2_hwpt->iommufd = idev->iommufd;
+        s2_hwpt->hwpt_id = s2_hwpt_id;
+        s2_hwpt->ioas_id = idev->ioas_id;
+    }
 
     viommu->iommufd = idev->iommufd;
     viommu->s2_hwpt = s2_hwpt;
@@ -995,8 +994,6 @@ free_viommu_core:
 free_viommu:
     g_free(viommu);
     host_iommu_device_iommufd_attach_hwpt(idev, sdev->idev->ioas_id, errp);
-free_s2_hwpt:
-    iommufd_backend_free_id(idev->iommufd, s2_hwpt_id);
     return false;
 }
 
@@ -1082,8 +1079,6 @@ static void smmu_dev_unset_iommu_device(PCIBus *bus, void *opaque, int devfn)
         iommufd_backend_free_id(viommu->iommufd, viommu->abort_hwpt_id);
         iommufd_backend_free_id(viommu->iommufd, viommu->core->viommu_id);
         g_free(viommu->core);
-        iommufd_backend_free_id(viommu->iommufd, viommu->s2_hwpt->hwpt_id);
-        g_free(viommu->s2_hwpt);
         g_free(viommu);
         s->viommu = NULL;
     }
