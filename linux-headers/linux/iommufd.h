@@ -547,11 +547,24 @@ struct iommu_hw_info_vtd {
 };
 
 /**
+ * enum iommu_hw_info_arm_smmuv3_flags - Flags for ARM SMMUv3 hw_info
+ * @IOMMU_HW_INFO_ARM_SMMUV3_HAS_TEGRA241_CMDQV: Tegra241 implementation with
+ *                                               CMDQV support; @impl is valid
+ */
+enum iommu_hw_info_arm_smmuv3_flags {
+	IOMMU_HW_INFO_ARM_SMMUV3_HAS_TEGRA241_CMDQV = 1 << 0,
+};
+
+/**
  * struct iommu_hw_info_arm_smmuv3 - ARM SMMUv3 hardware information
  *                                   (IOMMU_HW_INFO_TYPE_ARM_SMMUV3)
  *
- * @flags: Must be set to 0
- * @__reserved: Must be 0
+ * @flags: Combination of enum iommu_hw_info_arm_smmuv3_flags
+ * @impl: Implementation-defined bits when the following flags are set:
+ *        - IOMMU_HW_INFO_ARM_SMMUV3_HAS_TEGRA241_CMDQV
+ *          Bits[15:12] - Log2 of the total number of SID replacements
+ *          Bits[07:04] - Log2 of the total number of vCMDQs per vIOMMU
+ *          Bits[03:00] - Version number for the CMDQ-V HW
  * @idr: Implemented features for ARM SMMU Non-secure programming interface
  * @iidr: Information about the implementation and implementer of ARM SMMU,
  *        and architecture version supported
@@ -582,7 +595,7 @@ struct iommu_hw_info_vtd {
  */
 struct iommu_hw_info_arm_smmuv3 {
 	__u32 flags;
-	__u32 __reserved;
+	__u32 impl;
 	__u32 idr[6];
 	__u32 iidr;
 	__u32 aidr;
@@ -1201,9 +1214,10 @@ struct iommu_vcmdq_alloc {
 	__u32 flags;
 	__u32 viommu_id;
 	__u32 type;
+	__u32 index;
 	__u32 out_vcmdq_id;
-	__u32 data_len;
-	__aligned_u64 data_uptr;
+	__aligned_u64 addr;
+	__aligned_u64 length;
 };
 #define IOMMU_VCMDQ_ALLOC _IO(IOMMUFD_TYPE, IOMMUFD_CMD_VCMDQ_ALLOC)
 #endif

@@ -95,7 +95,8 @@ struct IOMMUFDVeventq *iommufd_viommu_alloc_eventq(IOMMUFDViommu *viommu,
                                                    uint32_t depth);
 struct IOMMUFDVcmdq *iommufd_viommu_alloc_cmdq(IOMMUFDViommu *viommu,
                                                uint32_t data_type,
-                                               uint32_t len, void *data_ptr);
+                                               uint32_t index, uint64_t addr,
+                                               uint64_t length);
 void *iommufd_viommu_get_shared_page(IOMMUFDViommu *viommu,
                                      uint32_t size, bool readonly);
 void iommufd_viommu_put_shared_page(IOMMUFDViommu *viommu,

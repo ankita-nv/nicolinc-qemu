@@ -69,10 +69,12 @@ struct Tegra241CMDQV {
 
 static void cmdqv_init_regs(Tegra241CMDQV *s)
 {
+    SMMUState *bs = ARM_SMMU(s->smmu_dev);
     int i;
 
     s->config = V_CONFIG_RESET;
-    s->param = V_PARAM_RESET;
+    s->param = bs->impl_info; //V_PARAM_RESET;
+    error_report("%s: param=%x", __func__, s->param);
     s->status = R_STATUS_CMDQV_ENABLED_MASK;
     for (i = 0; i < 2; i++) {
         s->vi_err_map[i] = 0;
@@ -400,21 +402,18 @@ static int tegra241_cmdqv_setup_vcmdq(Tegra241CMDQV *s, int index)
     SMMUState *bs = ARM_SMMU(s->smmu_dev);
     uint64_t base_mask = (uint64_t)R_VCMDQ0_BASE_L_ADDR_MASK |
                          (uint64_t)R_VCMDQ0_BASE_H_ADDR_MASK << 32;
-    struct iommu_vcmdq_tegra241_cmdqv data = {
-        .vcmdq_id = index,
-        .vcmdq_log2size = s->vcmdq_base[index] &
-                          R_VCMDQ0_BASE_L_LOG2SIZE_MASK,
-        .vcmdq_base = s->vcmdq_base[index] & base_mask,
-    };
+    uint64_t addr = s->vcmdq_base[index] & base_mask;
+    uint64_t shift = s->vcmdq_base[index] & R_VCMDQ0_BASE_L_LOG2SIZE_MASK;
+    uint64_t size = 1 << (shift + 4);
     IOMMUFDVcmdq *vcmdq = s->vcmdq[index];
 
     if (!bs->viommu) {
         return -ENODEV;
     }
-    if (!data.vcmdq_log2size) {
+    if (!size) {
         return -EINVAL;
     }
-    if (!cpu_physical_memory_is_ram(data.vcmdq_base)) {
+    if (!cpu_physical_memory_is_ram(addr)) {
         return -EINVAL;
     }
     if (vcmdq) {
@@ -434,8 +433,8 @@ static int tegra241_cmdqv_setup_vcmdq(Tegra241CMDQV *s, int index)
         }
     }
     vcmdq = iommufd_viommu_alloc_cmdq(s->viommu,
-                                      IOMMU_VCMDQ_TYPE_TEGRA241_CMDQV,
-                                      sizeof(data), (void *)&data);
+                                      IOMMU_VCMDQ_TYPE_TEGRA241_CMDQV, index,
+                                      addr, size);
     if (!vcmdq) {
         error_report("failed to allocate VCMDQ%d, viommu_id=%d", index, s->viommu->viommu_id);
         return -ENODEV;
@@ -638,7 +637,7 @@ static void cmdqv_reset(DeviceState *d)
     Tegra241CMDQV *s = TEGRA241_CMDQV(d);
     int i;
 
-    for (i = 0; i < 128; i++) {
+    for (i = 127; i >= 0; i--) {
         if (s->vcmdq[i]) {
             iommufd_backend_free_id(s->viommu->iommufd,
                                     s->vcmdq[i]->vcmdq_id);

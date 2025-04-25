@@ -479,7 +479,8 @@ struct IOMMUFDVeventq *iommufd_viommu_alloc_eventq(IOMMUFDViommu *viommu,
 
 struct IOMMUFDVcmdq *iommufd_viommu_alloc_cmdq(IOMMUFDViommu *viommu,
                                                uint32_t data_type,
-                                               uint32_t len, void *data_ptr)
+                                               uint32_t index, uint64_t addr,
+                                               uint64_t length)
 {
     int ret, fd = viommu->iommufd->fd;
     struct IOMMUFDVcmdq *vcmdq = g_malloc(sizeof(*vcmdq));
@@ -488,8 +489,9 @@ struct IOMMUFDVcmdq *iommufd_viommu_alloc_cmdq(IOMMUFDViommu *viommu,
         .flags = 0,
         .viommu_id = viommu->viommu_id,
         .type = data_type,
-        .data_len = len,
-        .data_uptr = (uint64_t)data_ptr,
+        .index = index,
+        .addr = addr,
+        .length = length,
     };
 
     if (!vcmdq) {
@@ -499,9 +501,8 @@ struct IOMMUFDVcmdq *iommufd_viommu_alloc_cmdq(IOMMUFDViommu *viommu,
 
     ret = ioctl(fd, IOMMU_VCMDQ_ALLOC, &alloc_vcmdq);
 
-    trace_iommufd_viommu_alloc_cmdq(fd, viommu->viommu_id, data_type,
-                                    len, (uint64_t)data_ptr,
-                                    alloc_vcmdq.out_vcmdq_id, ret);
+    trace_iommufd_viommu_alloc_cmdq(fd, viommu->viommu_id, data_type, index, addr,
+                                    length, alloc_vcmdq.out_vcmdq_id, ret);
     if (ret) {
         error_report("IOMMU_VQUEUE_ALLOC failed: %s", strerror(errno));
         g_free(vcmdq);
