@@ -826,7 +826,7 @@ static bool hiod_iommufd_vfio_realize(HostIOMMUDevice *hiod, void *opaque,
 {
     VFIODevice *vdev = opaque;
     HostIOMMUDeviceCaps *caps = &hiod->caps;
-    enum iommu_hw_info_type type;
+    enum iommu_hw_info_type type = IOMMU_HW_INFO_TYPE_DEFAULT;
     union {
         struct iommu_hw_info_vtd vtd;
     } data;
@@ -851,6 +851,7 @@ static bool hiod_iommufd_vfio_realize(HostIOMMUDevice *hiod, void *opaque,
         caps->errata = data.vtd.flags & IOMMU_HW_INFO_VTD_ERRATA_772415_SPR17;
         break;
     case IOMMU_HW_INFO_TYPE_ARM_SMMUV3:
+    case IOMMU_HW_INFO_TYPE_TEGRA241_CMDQV:
     case IOMMU_HW_INFO_TYPE_NONE:
         break;
     }
