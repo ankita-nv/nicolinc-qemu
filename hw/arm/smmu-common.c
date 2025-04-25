@@ -1013,6 +1013,7 @@ static bool smmu_dev_set_iommu_device(PCIBus *bus, void *opaque, int devfn,
     SMMUState *s = opaque;
     SMMUPciBus *sbus = smmu_get_sbus(s, bus);
     SMMUDevice *sdev = smmu_get_sdev(s, sbus, bus, devfn);
+    uint32_t data_type;
 
     if (!s->nested) {
         return true;
@@ -1039,6 +1040,13 @@ static bool smmu_dev_set_iommu_device(PCIBus *bus, void *opaque, int devfn,
     sdev->viommu = s->viommu;
     QLIST_INSERT_HEAD(&s->viommu->device_list, sdev, next);
     trace_smmu_set_iommu_device(devfn, smmu_get_sid(sdev));
+
+    if (smmu_dev_get_info(sdev, &data_type, sizeof(sdev->info), &sdev->info)) {
+        error_report("failed to get SMMU device info");
+        return false;
+    }
+    s->impl_info = sdev->info.impl;
+    error_report("%s: SMMUv3 flags=%x, impl = %x", __func__, sdev->info.flags, s->impl_info);
 
     return true;
 }

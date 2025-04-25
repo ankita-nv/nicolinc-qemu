@@ -56,7 +56,7 @@ enum {
 	IOMMUFD_CMD_VDEVICE_ALLOC = 0x91,
 	IOMMUFD_CMD_IOAS_CHANGE_PROCESS = 0x92,
 	IOMMUFD_CMD_VEVENTQ_ALLOC = 0x93,
-	IOMMUFD_CMD_VCMDQ_ALLOC = 0x94,
+	IOMMUFD_CMD_HW_QUEUE_ALLOC = 0x94,
 };
 
 /**
@@ -547,11 +547,25 @@ struct iommu_hw_info_vtd {
 };
 
 /**
+ * enum iommu_hw_info_arm_smmuv3_flags - Flags for ARM SMMUv3 hw_info
+ * @IOMMU_HW_INFO_ARM_SMMUV3_HAS_TEGRA241_CMDQV: Tegra241 implementation with
+ *                                               CMDQV support; @impl is valid
+ */
+enum iommu_hw_info_arm_smmuv3_flags {
+	IOMMU_HW_INFO_ARM_SMMUV3_HAS_TEGRA241_CMDQV = 1 << 0,
+};
+
+/**
  * struct iommu_hw_info_arm_smmuv3 - ARM SMMUv3 hardware information
  *                                   (IOMMU_HW_INFO_TYPE_ARM_SMMUV3)
  *
- * @flags: Must be set to 0
- * @__reserved: Must be 0
+ * @flags: Combination of enum iommu_hw_info_arm_smmuv3_flags
+ * @impl: Implementation-defined bits when the following flags are set:
+ *        - IOMMU_HW_INFO_ARM_SMMUV3_HAS_TEGRA241_CMDQV
+ *          Bits[15:12] - Log2 of the total number of SID replacements
+ *          Bits[11:08] - Log2 of the total number of VINTFs per vIOMMU
+ *          Bits[07:04] - Log2 of the total number of VCMDQs per vIOMMU
+ *          Bits[03:00] - Version number for the CMDQ-V HW
  * @idr: Implemented features for ARM SMMU Non-secure programming interface
  * @iidr: Information about the implementation and implementer of ARM SMMU,
  *        and architecture version supported
@@ -582,7 +596,7 @@ struct iommu_hw_info_vtd {
  */
 struct iommu_hw_info_arm_smmuv3 {
 	__u32 flags;
-	__u32 __reserved;
+	__u32 impl;
 	__u32 idr[6];
 	__u32 iidr;
 	__u32 aidr;
@@ -948,17 +962,17 @@ enum iommu_viommu_type {
 /**
  * struct iommu_viommu_tegra241_cmdqv - NVIDIA Tegra241 CMDQV Virtual Interface
  *                                      (IOMMU_VIOMMU_TYPE_TEGRA241_CMDQV)
- * @out_vintf_page0_pgoff: Offset of the VINTF page0 for mmap syscall
- * @out_vintf_page0_pgsz: Size of the VINTF page0 for mmap syscall
+ * @out_vintf_mmap_offset: mmap offset argument for VINTF's page0
+ * @out_vintf_mmap_length: mmap length argument for VINTF's page0
  *
- * Both @out_vintf_page0_pgoff and @out_vintf_page0_pgsz are given by the kernel
+ * Both @out_vintf_mmap_offset and @out_vintf_mmap_length are reported by kernel
  * for user space to mmap the VINTF page0 from the host physical address space
  * to the guest physical address space so that a guest kernel can directly R/W
- * access to the VINTF page0 in order to control its virtual comamnd queues.
+ * access to the VINTF page0 in order to control its virtual command queues.
  */
 struct iommu_viommu_tegra241_cmdqv {
-	__aligned_u64 out_vintf_page0_pgoff;
-	__aligned_u64 out_vintf_page0_pgsz;
+	__aligned_u64 out_vintf_mmap_offset;
+	__aligned_u64 out_vintf_mmap_length;
 };
 
 /**
@@ -1110,12 +1124,12 @@ struct iommu_vevent_arm_smmuv3 {
 };
 
 /**
- * struct iommu_vevent_tegra241_cmdqv - Tegra241 CMDQV Virtual IRQ
+ * struct iommu_vevent_tegra241_cmdqv - Tegra241 CMDQV IRQ
  *                                      (IOMMU_VEVENTQ_TYPE_TEGRA241_CMDQV)
  * @lvcmdq_err_map: 128-bit logical vcmdq error map, little-endian.
  *                  (Refer to register LVCMDQ_ERR_MAPs per VINTF )
  *
- * The 128-bit register values from HW exclusively reflect the error bits for a
+ * The 128-bit register value from HW exclusively reflect the error bits for a
  * Virtual Interface represented by a vIOMMU object. Read and report directly.
  */
 struct iommu_vevent_tegra241_cmdqv {
@@ -1161,49 +1175,58 @@ struct iommu_veventq_alloc {
 #define IOMMU_VEVENTQ_ALLOC _IO(IOMMUFD_TYPE, IOMMUFD_CMD_VEVENTQ_ALLOC)
 
 /**
- * enum iommu_vcmdq_type - Virtual Queue Type
- * @IOMMU_VCMDQ_TYPE_DEFAULT: Reserved for future use
- * @IOMMU_VCMDQ_TYPE_TEGRA241_CMDQV: NVIDIA Tegra241 CMDQV Extension for SMMUv3
+ * enum iommu_hw_queue_type - HW Queue Type
+ * @IOMMU_HW_QUEUE_TYPE_DEFAULT: Reserved for future use
+ * @IOMMU_HW_QUEUE_TYPE_TEGRA241_CMDQV: NVIDIA Tegra241 CMDQV Extension for
+ *                                      ARM SMMUv3
  */
-enum iommu_vcmdq_data_type {
-	IOMMU_VCMDQ_TYPE_DEFAULT = 0,
-	IOMMU_VCMDQ_TYPE_TEGRA241_CMDQV = 1,
+enum iommu_hw_queue_type {
+	IOMMU_HW_QUEUE_TYPE_DEFAULT = 0,
+	/*
+	 * TEGRA241_CMDQV requirements (otherwise, allocation will fail)
+	 * - alloc starts from the lowest @index=0 in ascending order
+	 * - destroy starts from the last allocated @index in descending order
+	 * - @base_addr must be aligned to @length in bytes and mapped in IOAS
+	 * - @length must be a power of 2, with a minimum 32 bytes and a maximum
+	 *   2 ^ idr[1].CMDQS * 16 bytes (use GET_HW_INFO call to read idr[1]
+	 *   from struct iommu_hw_info_arm_smmuv3)
+	 * - suggest to back the queue memory with contiguous physical pages or
+	 *   a single huge page with alignment of the queue size, limit vSMMU's
+	 *   IDR1.CMDQS to the huge page size divided by 16 bytes
+	 */
+	IOMMU_HW_QUEUE_TYPE_TEGRA241_CMDQV = 1,
 };
 
 /**
- * struct iommu_vqueue_tegra241_cmdqv - NVIDIA Tegra241's Virtual Command Queue
- *                                      for its CMDQV Extension for ARM SMMUv3
- *                                      (IOMMU_VCMDQ_TYPE_TEGRA241_CMDQV)
- * @vcmdq_id: logical ID of a virtual command queue in the VIOMMU instance
- * @vcmdq_log2size: (1 << @vcmdq_log2size) will be the size of the vcmdq
- * @vcmdq_base: guest physical address (IPA) to the vcmdq base address
- */
-struct iommu_vcmdq_tegra241_cmdqv {
-	__u32 vcmdq_id;
-	__u32 vcmdq_log2size;
-	__aligned_u64 vcmdq_base;
-};
-
-/**
- * struct iommu_vcmdq_alloc - ioctl(IOMMU_VCMDQ_ALLOC)
- * @size: sizeof(struct iommu_vcmdq_alloc)
+ * struct iommu_hw_queue_alloc - ioctl(IOMMU_HW_QUEUE_ALLOC)
+ * @size: sizeof(struct iommu_hw_queue_alloc)
  * @flags: Must be 0
- * @viommu_id: viommu ID to associate the virtual queue with
- * @type: One of enum iommu_vcmdq_type
- * @out_vcmdq_id: The ID of the new virtual queue
- * @data_len: Length of the type specific data
- * @data_uptr: User pointer to the type specific data
+ * @viommu_id: Virtual IOMMU ID to associate the HW queue with
+ * @type: One of enum iommu_hw_queue_type
+ * @index: The logical index to the HW queue per virtual IOMMU for a multi-queue
+ *         model
+ * @out_hw_queue_id: The ID of the new HW queue
+ * @base_addr: Base address of the queue memory in guest physical address space
+ * @length: Length of the queue memory in the guest physical address space
  *
- * Allocate a virtual queue object for vIOMMU-specific HW-accelerated queue
+ * Allocate a HW queue object for a vIOMMU-specific HW-accelerated queue, which
+ * allows HW to access a guest queue memory described by @base_addr and @length.
+ * Upon success, the underlying physical pages of the guest queue memory will be
+ * pinned to prevent VMM from unmapping them in the IOAS until the HW queue gets
+ * destroyed.
+ *
+ * A vIOMMU can allocate multiple queues, but it must use a different @index to
+ * separate each allocation, e.g. HW queue0, HW queue1, ...
  */
-struct iommu_vcmdq_alloc {
+struct iommu_hw_queue_alloc {
 	__u32 size;
 	__u32 flags;
 	__u32 viommu_id;
 	__u32 type;
-	__u32 out_vcmdq_id;
-	__u32 data_len;
-	__aligned_u64 data_uptr;
+	__u32 index;
+	__u32 out_hw_queue_id;
+	__aligned_u64 base_addr;
+	__aligned_u64 length;
 };
-#define IOMMU_VCMDQ_ALLOC _IO(IOMMUFD_TYPE, IOMMUFD_CMD_VCMDQ_ALLOC)
+#define IOMMU_HW_QUEUE_ALLOC _IO(IOMMUFD_TYPE, IOMMUFD_CMD_HW_QUEUE_ALLOC)
 #endif
