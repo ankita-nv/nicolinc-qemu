@@ -477,40 +477,41 @@ struct IOMMUFDVeventq *iommufd_viommu_alloc_eventq(IOMMUFDViommu *viommu,
     return veventq;
 }
 
-struct IOMMUFDVcmdq *iommufd_viommu_alloc_cmdq(IOMMUFDViommu *viommu,
-                                               uint32_t data_type,
-                                               uint32_t len, void *data_ptr)
+struct IOMMUFDVqueue *iommufd_viommu_alloc_queue(IOMMUFDViommu *viommu,
+                                                 uint32_t data_type,
+                                                 uint32_t index, uint64_t addr,
+                                                 uint64_t length)
 {
     int ret, fd = viommu->iommufd->fd;
-    struct IOMMUFDVcmdq *vcmdq = g_malloc(sizeof(*vcmdq));
-    struct iommu_vcmdq_alloc alloc_vcmdq = {
-        .size = sizeof(alloc_vcmdq),
+    struct IOMMUFDVqueue *vqueue = g_malloc(sizeof(*vqueue));
+    struct iommu_vqueue_alloc alloc_vqueue = {
+        .size = sizeof(alloc_vqueue),
         .flags = 0,
         .viommu_id = viommu->viommu_id,
         .type = data_type,
-        .data_len = len,
-        .data_uptr = (uint64_t)data_ptr,
+        .index = index,
+        .addr = addr,
+        .length = length,
     };
 
-    if (!vcmdq) {
-        error_report("failed to allocate vcmdq object");
+    if (!vqueue) {
+        error_report("failed to allocate vqueue object");
         return NULL;
     }
 
-    ret = ioctl(fd, IOMMU_VCMDQ_ALLOC, &alloc_vcmdq);
+    ret = ioctl(fd, IOMMU_VQUEUE_ALLOC, &alloc_vqueue);
 
-    trace_iommufd_viommu_alloc_cmdq(fd, viommu->viommu_id, data_type,
-                                    len, (uint64_t)data_ptr,
-                                    alloc_vcmdq.out_vcmdq_id, ret);
+    trace_iommufd_viommu_alloc_queue(fd, viommu->viommu_id, data_type, index, addr,
+                                    length, alloc_vqueue.out_vqueue_id, ret);
     if (ret) {
         error_report("IOMMU_VQUEUE_ALLOC failed: %s", strerror(errno));
-        g_free(vcmdq);
+        g_free(vqueue);
         return NULL;
     }
 
-    vcmdq->vcmdq_id = alloc_vcmdq.out_vcmdq_id;
-    vcmdq->viommu = viommu;
-    return vcmdq;
+    vqueue->vqueue_id = alloc_vqueue.out_vqueue_id;
+    vqueue->viommu = viommu;
+    return vqueue;
 }
 
 void *iommufd_viommu_get_shared_page(IOMMUFDViommu *viommu,
