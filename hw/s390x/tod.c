@@ -13,9 +13,9 @@
 #include "qapi/error.h"
 #include "qemu/error-report.h"
 #include "qemu/module.h"
-#include "sysemu/kvm.h"
-#include "sysemu/tcg.h"
-#include "sysemu/qtest.h"
+#include "system/kvm.h"
+#include "system/tcg.h"
+#include "system/qtest.h"
 #include "migration/qemu-file-types.h"
 #include "migration/register.h"
 
@@ -123,7 +123,7 @@ static void s390_tod_class_init(ObjectClass *oc, void *data)
     dc->user_creatable = false;
 }
 
-static TypeInfo s390_tod_info = {
+static const TypeInfo s390_tod_info = {
     .name = TYPE_S390_TOD,
     .parent = TYPE_DEVICE,
     .instance_size = sizeof(S390TODState),

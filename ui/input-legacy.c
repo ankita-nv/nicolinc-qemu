@@ -23,6 +23,7 @@
  */
 
 #include "qemu/osdep.h"
+#include "qemu/log.h"
 #include "qapi/qapi-commands-ui.h"
 #include "ui/console.h"
 #include "keymaps.h"
@@ -108,43 +109,6 @@ void qmp_send_key(KeyValueList *keys, bool has_hold_time, int64_t hold_time,
     g_free(up);
 }
 
-static void legacy_kbd_event(DeviceState *dev, QemuConsole *src,
-                             InputEvent *evt)
-{
-    QEMUPutKbdEntry *entry = (QEMUPutKbdEntry *)dev;
-    int scancodes[3], i, count;
-    InputKeyEvent *key = evt->u.key.data;
-
-    if (!entry || !entry->put_kbd) {
-        return;
-    }
-    count = qemu_input_key_value_to_scancode(key->key,
-                                             key->down,
-                                             scancodes);
-    for (i = 0; i < count; i++) {
-        entry->put_kbd(entry->opaque, scancodes[i]);
-    }
-}
-
-static QemuInputHandler legacy_kbd_handler = {
-    .name  = "legacy-kbd",
-    .mask  = INPUT_EVENT_MASK_KEY,
-    .event = legacy_kbd_event,
-};
-
-QEMUPutKbdEntry *qemu_add_kbd_event_handler(QEMUPutKBDEvent *func, void *opaque)
-{
-    QEMUPutKbdEntry *entry;
-
-    entry = g_new0(QEMUPutKbdEntry, 1);
-    entry->put_kbd = func;
-    entry->opaque = opaque;
-    entry->s = qemu_input_handler_register((DeviceState *)entry,
-                                           &legacy_kbd_handler);
-    qemu_input_handler_activate(entry->s);
-    return entry;
-}
-
 static void legacy_mouse_event(DeviceState *dev, QemuConsole *src,
                                InputEvent *evt)
 {
@@ -177,6 +141,20 @@ static void legacy_mouse_event(DeviceState *dev, QemuConsole *src,
                                     s->axis[INPUT_AXIS_X],
                                     s->axis[INPUT_AXIS_Y],
                                     1,
+                                    s->buttons);
+        }
+        if (btn->down && btn->button == INPUT_BUTTON_WHEEL_RIGHT) {
+            s->qemu_put_mouse_event(s->qemu_put_mouse_event_opaque,
+                                    s->axis[INPUT_AXIS_X],
+                                    s->axis[INPUT_AXIS_Y],
+                                    -2,
+                                    s->buttons);
+        }
+        if (btn->down && btn->button == INPUT_BUTTON_WHEEL_LEFT) {
+            s->qemu_put_mouse_event(s->qemu_put_mouse_event_opaque,
+                                    s->axis[INPUT_AXIS_X],
+                                    s->axis[INPUT_AXIS_Y],
+                                    2,
                                     s->buttons);
         }
         break;

@@ -23,6 +23,7 @@ Testing: -blockdev file,node-name=base,filename=TEST_DIR/t.IMGFMT.base -blockdev
         {
             "iops_rd": 0,
             "detect_zeroes": "off",
+            "active": true,
             "image": {
                 "backing-image": {
                     "backing-image": {
@@ -74,6 +75,7 @@ Testing: -blockdev file,node-name=base,filename=TEST_DIR/t.IMGFMT.base -blockdev
         {
             "iops_rd": 0,
             "detect_zeroes": "off",
+            "active": true,
             "image": {
                 "virtual-size": 197120,
                 "filename": "TEST_DIR/t.IMGFMT",
@@ -102,6 +104,7 @@ Testing: -blockdev file,node-name=base,filename=TEST_DIR/t.IMGFMT.base -blockdev
         {
             "iops_rd": 0,
             "detect_zeroes": "off",
+            "active": true,
             "image": {
                 "backing-image": {
                     "virtual-size": 197120,
@@ -142,6 +145,7 @@ Testing: -blockdev file,node-name=base,filename=TEST_DIR/t.IMGFMT.base -blockdev
         {
             "iops_rd": 0,
             "detect_zeroes": "off",
+            "active": true,
             "image": {
                 "virtual-size": 197120,
                 "filename": "TEST_DIR/t.IMGFMT.mid",
@@ -170,6 +174,7 @@ Testing: -blockdev file,node-name=base,filename=TEST_DIR/t.IMGFMT.base -blockdev
         {
             "iops_rd": 0,
             "detect_zeroes": "off",
+            "active": true,
             "image": {
                 "virtual-size": 197120,
                 "filename": "TEST_DIR/t.IMGFMT.base",
@@ -204,7 +209,6 @@ Testing: -blockdev file,node-name=base,filename=TEST_DIR/t.IMGFMT.base -blockdev
                 "name": "file",
                 "parent": 5,
                 "shared-perm": [
-                    "graph-mod",
                     "write-unchanged",
                     "consistent-read"
                 ],
@@ -219,7 +223,6 @@ Testing: -blockdev file,node-name=base,filename=TEST_DIR/t.IMGFMT.base -blockdev
                 "name": "backing",
                 "parent": 5,
                 "shared-perm": [
-                    "graph-mod",
                     "resize",
                     "write-unchanged",
                     "write",
@@ -233,7 +236,6 @@ Testing: -blockdev file,node-name=base,filename=TEST_DIR/t.IMGFMT.base -blockdev
                 "name": "file",
                 "parent": 3,
                 "shared-perm": [
-                    "graph-mod",
                     "write-unchanged",
                     "consistent-read"
                 ],
@@ -246,7 +248,6 @@ Testing: -blockdev file,node-name=base,filename=TEST_DIR/t.IMGFMT.base -blockdev
                 "name": "backing",
                 "parent": 3,
                 "shared-perm": [
-                    "graph-mod",
                     "resize",
                     "write-unchanged",
                     "write",
@@ -287,10 +288,6 @@ Testing: -blockdev file,node-name=base,filename=TEST_DIR/t.IMGFMT.base -blockdev
     }
 }
 {
-    "return": {
-    }
-}
-{
     "timestamp": {
         "seconds":  TIMESTAMP,
         "microseconds":  TIMESTAMP
@@ -299,6 +296,10 @@ Testing: -blockdev file,node-name=base,filename=TEST_DIR/t.IMGFMT.base -blockdev
     "data": {
         "guest": false,
         "reason": "host-qmp-quit"
+    }
+}
+{
+    "return": {
     }
 }
 

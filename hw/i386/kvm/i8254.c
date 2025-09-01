@@ -29,11 +29,12 @@
 #include "qapi/error.h"
 #include "qemu/module.h"
 #include "qemu/timer.h"
-#include "sysemu/runstate.h"
+#include "system/runstate.h"
 #include "hw/timer/i8254.h"
 #include "hw/timer/i8254_internal.h"
 #include "hw/qdev-properties-system.h"
-#include "sysemu/kvm.h"
+#include "system/kvm.h"
+#include "target/i386/kvm/kvm_i386.h"
 #include "qom/object.h"
 
 #define KVM_PIT_REINJECT_BIT 0
@@ -59,11 +60,6 @@ struct KVMPITClass {
     DeviceRealize parent_realize;
 };
 
-static int64_t abs64(int64_t v)
-{
-    return v < 0 ? -v : v;
-}
-
 static void kvm_pit_update_clock_offset(KVMPITState *s)
 {
     int64_t offset, clock_offset;
@@ -81,7 +77,7 @@ static void kvm_pit_update_clock_offset(KVMPITState *s)
         clock_gettime(CLOCK_MONOTONIC, &ts);
         offset -= ts.tv_nsec;
         offset -= (int64_t)ts.tv_sec * 1000000000;
-        if (abs64(offset) < abs64(clock_offset)) {
+        if (uabs64(offset) < uabs64(clock_offset)) {
             clock_offset = offset;
         }
     }
@@ -101,24 +97,12 @@ static void kvm_pit_get(PITCommonState *pit)
         return;
     }
 
-    if (kvm_has_pit_state2()) {
-        ret = kvm_vm_ioctl(kvm_state, KVM_GET_PIT2, &kpit);
-        if (ret < 0) {
-            fprintf(stderr, "KVM_GET_PIT2 failed: %s\n", strerror(-ret));
-            abort();
-        }
-        pit->channels[0].irq_disabled = kpit.flags & KVM_PIT_FLAGS_HPET_LEGACY;
-    } else {
-        /*
-         * kvm_pit_state2 is superset of kvm_pit_state struct,
-         * so we can use it for KVM_GET_PIT as well.
-         */
-        ret = kvm_vm_ioctl(kvm_state, KVM_GET_PIT, &kpit);
-        if (ret < 0) {
-            fprintf(stderr, "KVM_GET_PIT failed: %s\n", strerror(-ret));
-            abort();
-        }
+    ret = kvm_vm_ioctl(kvm_state, KVM_GET_PIT2, &kpit);
+    if (ret < 0) {
+        fprintf(stderr, "KVM_GET_PIT2 failed: %s\n", strerror(-ret));
+        abort();
     }
+    pit->channels[0].irq_disabled = kpit.flags & KVM_PIT_FLAGS_HPET_LEGACY;
     for (i = 0; i < 3; i++) {
         kchan = &kpit.channels[i];
         sc = &pit->channels[i];
@@ -174,12 +158,9 @@ static void kvm_pit_put(PITCommonState *pit)
         kchan->count_load_time = sc->count_load_time - s->kernel_clock_offset;
     }
 
-    ret = kvm_vm_ioctl(kvm_state,
-                       kvm_has_pit_state2() ? KVM_SET_PIT2 : KVM_SET_PIT,
-                       &kpit);
+    ret = kvm_vm_ioctl(kvm_state, KVM_SET_PIT2, &kpit);
     if (ret < 0) {
-        fprintf(stderr, "%s failed: %s\n",
-                kvm_has_pit_state2() ? "KVM_SET_PIT2" : "KVM_SET_PIT",
+        fprintf(stderr, "KVM_SET_PIT2 failed: %s\n",
                 strerror(-ret));
         abort();
     }
@@ -265,11 +246,12 @@ static void kvm_pit_realizefn(DeviceState *dev, Error **errp)
     };
     int ret;
 
-    if (kvm_check_extension(kvm_state, KVM_CAP_PIT2)) {
-        ret = kvm_vm_ioctl(kvm_state, KVM_CREATE_PIT2, &config);
-    } else {
-        ret = kvm_vm_ioctl(kvm_state, KVM_CREATE_PIT);
+    if (!kvm_check_extension(kvm_state, KVM_CAP_PIT_STATE2) ||
+        !kvm_check_extension(kvm_state, KVM_CAP_PIT2)) {
+        error_setg(errp, "In-kernel PIT not available");
     }
+
+    ret = kvm_vm_ioctl(kvm_state, KVM_CREATE_PIT2, &config);
     if (ret < 0) {
         error_setg(errp, "Create kernel PIC irqchip failed: %s",
                    strerror(-ret));
@@ -305,11 +287,9 @@ static void kvm_pit_realizefn(DeviceState *dev, Error **errp)
     kpc->parent_realize(dev, errp);
 }
 
-static Property kvm_pit_properties[] = {
-    DEFINE_PROP_UINT32("iobase", PITCommonState, iobase,  -1),
+static const Property kvm_pit_properties[] = {
     DEFINE_PROP_LOSTTICKPOLICY("lost_tick_policy", KVMPITState,
                                lost_tick_policy, LOST_TICK_POLICY_DELAY),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void kvm_pit_class_init(ObjectClass *klass, void *data)
@@ -322,7 +302,7 @@ static void kvm_pit_class_init(ObjectClass *klass, void *data)
                                     &kpc->parent_realize);
     k->set_channel_gate = kvm_pit_set_gate;
     k->get_channel_info = kvm_pit_get_channel_info;
-    dc->reset = kvm_pit_reset;
+    device_class_set_legacy_reset(dc, kvm_pit_reset);
     device_class_set_props(dc, kvm_pit_properties);
 }
 

@@ -461,14 +461,14 @@ static const uint8_t qemu_mouse_hid_report_descriptor[] = {
     0xa1, 0x00,		/*   Collection (Physical) */
     0x05, 0x09,		/*     Usage Page (Button) */
     0x19, 0x01,		/*     Usage Minimum (1) */
-    0x29, 0x03,		/*     Usage Maximum (3) */
+    0x29, 0x05,		/*     Usage Maximum (5) */
     0x15, 0x00,		/*     Logical Minimum (0) */
     0x25, 0x01,		/*     Logical Maximum (1) */
-    0x95, 0x03,		/*     Report Count (3) */
+    0x95, 0x05,		/*     Report Count (5) */
     0x75, 0x01,		/*     Report Size (1) */
     0x81, 0x02,		/*     Input (Data, Variable, Absolute) */
     0x95, 0x01,		/*     Report Count (1) */
-    0x75, 0x05,		/*     Report Size (5) */
+    0x75, 0x03,		/*     Report Size (3) */
     0x81, 0x01,		/*     Input (Constant) */
     0x05, 0x01,		/*     Usage Page (Generic Desktop) */
     0x09, 0x30,		/*     Usage (X) */
@@ -756,7 +756,7 @@ static const VMStateDescription vmstate_usb_ptr = {
     .version_id = 1,
     .minimum_version_id = 1,
     .post_load = usb_ptr_post_load,
-    .fields = (VMStateField[]) {
+    .fields = (const VMStateField[]) {
         VMSTATE_USB_DEVICE(dev, USBHIDState),
         VMSTATE_HID_POINTER_DEVICE(hid, USBHIDState),
         VMSTATE_END_OF_LIST()
@@ -767,7 +767,7 @@ static const VMStateDescription vmstate_usb_kbd = {
     .name = "usb-kbd",
     .version_id = 1,
     .minimum_version_id = 1,
-    .fields = (VMStateField[]) {
+    .fields = (const VMStateField[]) {
         VMSTATE_USB_DEVICE(dev, USBHIDState),
         VMSTATE_HID_KEYBOARD_DEVICE(hid, USBHIDState),
         VMSTATE_END_OF_LIST()
@@ -793,11 +793,10 @@ static const TypeInfo usb_hid_type_info = {
     .class_init = usb_hid_class_initfn,
 };
 
-static Property usb_tablet_properties[] = {
+static const Property usb_tablet_properties[] = {
         DEFINE_PROP_UINT32("usb_version", USBHIDState, usb_version, 2),
         DEFINE_PROP_STRING("display", USBHIDState, display),
         DEFINE_PROP_UINT32("head", USBHIDState, head, 0),
-        DEFINE_PROP_END_OF_LIST(),
 };
 
 static void usb_tablet_class_initfn(ObjectClass *klass, void *data)
@@ -818,9 +817,8 @@ static const TypeInfo usb_tablet_info = {
     .class_init    = usb_tablet_class_initfn,
 };
 
-static Property usb_mouse_properties[] = {
+static const Property usb_mouse_properties[] = {
         DEFINE_PROP_UINT32("usb_version", USBHIDState, usb_version, 2),
-        DEFINE_PROP_END_OF_LIST(),
 };
 
 static void usb_mouse_class_initfn(ObjectClass *klass, void *data)
@@ -841,10 +839,9 @@ static const TypeInfo usb_mouse_info = {
     .class_init    = usb_mouse_class_initfn,
 };
 
-static Property usb_keyboard_properties[] = {
+static const Property usb_keyboard_properties[] = {
         DEFINE_PROP_UINT32("usb_version", USBHIDState, usb_version, 2),
         DEFINE_PROP_STRING("display", USBHIDState, display),
-        DEFINE_PROP_END_OF_LIST(),
 };
 
 static void usb_keyboard_class_initfn(ObjectClass *klass, void *data)

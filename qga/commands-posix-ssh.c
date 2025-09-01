@@ -9,6 +9,7 @@
 #include <locale.h>
 #include <pwd.h>
 
+#include "commands-common-ssh.h"
 #include "qapi/error.h"
 #include "qga-qapi-commands.h"
 
@@ -35,7 +36,7 @@ test_get_passwd_entry(const gchar *user_name, GError **error)
     return p;
 }
 
-#define g_unix_get_passwd_entry_qemu(username, err) \
+#define g_unix_get_passwd_entry(username, err) \
    test_get_passwd_entry(username, err)
 #endif
 
@@ -45,9 +46,7 @@ get_passwd_entry(const char *username, Error **errp)
     g_autoptr(GError) err = NULL;
     struct passwd *p;
 
-    ERRP_GUARD();
-
-    p = g_unix_get_passwd_entry_qemu(username, &err);
+    p = g_unix_get_passwd_entry(username, &err);
     if (p == NULL) {
         error_setg(errp, "failed to lookup user '%s': %s",
                    username, err->message);
@@ -61,8 +60,6 @@ static bool
 mkdir_for_user(const char *path, const struct passwd *p,
                mode_t mode, Error **errp)
 {
-    ERRP_GUARD();
-
     if (g_mkdir(path, mode) == -1) {
         error_setg(errp, "failed to create directory '%s': %s",
                    path, g_strerror(errno));
@@ -85,48 +82,11 @@ mkdir_for_user(const char *path, const struct passwd *p,
 }
 
 static bool
-check_openssh_pub_key(const char *key, Error **errp)
-{
-    ERRP_GUARD();
-
-    /* simple sanity-check, we may want more? */
-    if (!key || key[0] == '#' || strchr(key, '\n')) {
-        error_setg(errp, "invalid OpenSSH public key: '%s'", key);
-        return false;
-    }
-
-    return true;
-}
-
-static bool
-check_openssh_pub_keys(strList *keys, size_t *nkeys, Error **errp)
-{
-    size_t n = 0;
-    strList *k;
-
-    ERRP_GUARD();
-
-    for (k = keys; k != NULL; k = k->next) {
-        if (!check_openssh_pub_key(k->value, errp)) {
-            return false;
-        }
-        n++;
-    }
-
-    if (nkeys) {
-        *nkeys = n;
-    }
-    return true;
-}
-
-static bool
 write_authkeys(const char *path, const GStrv keys,
                const struct passwd *p, Error **errp)
 {
     g_autofree char *contents = NULL;
     g_autoptr(GError) err = NULL;
-
-    ERRP_GUARD();
 
     contents = g_strjoinv("\n", keys);
     if (!g_file_set_contents(path, contents, -1, &err)) {
@@ -149,23 +109,6 @@ write_authkeys(const char *path, const GStrv keys,
     return true;
 }
 
-static GStrv
-read_authkeys(const char *path, Error **errp)
-{
-    g_autoptr(GError) err = NULL;
-    g_autofree char *contents = NULL;
-
-    ERRP_GUARD();
-
-    if (!g_file_get_contents(path, &contents, NULL, &err)) {
-        error_setg(errp, "failed to read '%s': %s", path, err->message);
-        return NULL;
-    }
-
-    return g_strsplit(contents, "\n", -1);
-
-}
-
 void
 qmp_guest_ssh_add_authorized_keys(const char *username, strList *keys,
                                   bool has_reset, bool reset,
@@ -178,7 +121,6 @@ qmp_guest_ssh_add_authorized_keys(const char *username, strList *keys,
     strList *k;
     size_t nkeys, nauthkeys;
 
-    ERRP_GUARD();
     reset = has_reset && reset;
 
     if (!check_openssh_pub_keys(keys, &nkeys, errp)) {
@@ -228,8 +170,6 @@ qmp_guest_ssh_remove_authorized_keys(const char *username, strList *keys,
     GStrv a;
     size_t nkeys = 0;
 
-    ERRP_GUARD();
-
     if (!check_openssh_pub_keys(keys, NULL, errp)) {
         return;
     }
@@ -277,8 +217,6 @@ qmp_guest_ssh_get_authorized_keys(const char *username, Error **errp)
     g_autoptr(GuestAuthorizedKeys) ret = NULL;
     int i;
 
-    ERRP_GUARD();
-
     p = get_passwd_entry(username, errp);
     if (p == NULL) {
         return NULL;
@@ -305,7 +243,6 @@ qmp_guest_ssh_get_authorized_keys(const char *username, Error **errp)
 }
 
 #ifdef QGA_BUILD_UNIT_TEST
-#if GLIB_CHECK_VERSION(2, 60, 0)
 static const strList test_key2 = {
     .value = (char *)"algo key2 comments"
 };
@@ -399,7 +336,7 @@ test_add_keys(void)
                                       &err);
     g_assert(err == NULL);
 
-    /*  key2 came first, and should'nt be duplicated */
+    /*  key2 came first, and shouldn't be duplicated */
     test_authorized_keys_equal("algo key2 comments\n"
                                "algo key1 comments");
 }
@@ -501,11 +438,4 @@ int main(int argc, char *argv[])
 
     return g_test_run();
 }
-#else
-int main(int argc, char *argv[])
-{
-    g_test_message("test skipped, needs glib >= 2.60");
-    return 0;
-}
-#endif /* GLIB_2_60 */
 #endif /* BUILD_UNIT_TEST */

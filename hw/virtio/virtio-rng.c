@@ -17,8 +17,8 @@
 #include "hw/virtio/virtio.h"
 #include "hw/qdev-properties.h"
 #include "hw/virtio/virtio-rng.h"
-#include "sysemu/rng.h"
-#include "sysemu/runstate.h"
+#include "system/rng.h"
+#include "system/runstate.h"
 #include "qom/object_interfaces.h"
 #include "trace.h"
 
@@ -184,8 +184,9 @@ static void virtio_rng_device_realize(DeviceState *dev, Error **errp)
 
     /* Workaround: Property parsing does not enforce unsigned integers,
      * So this is a hack to reject such numbers. */
-    if (vrng->conf.max_bytes > INT64_MAX) {
-        error_setg(errp, "'max-bytes' parameter must be non-negative, "
+    if (vrng->conf.max_bytes == 0 ||
+        vrng->conf.max_bytes > INT64_MAX) {
+        error_setg(errp, "'max-bytes' parameter must be positive, "
                    "and less than 2^63");
         return;
     }
@@ -215,7 +216,7 @@ static void virtio_rng_device_realize(DeviceState *dev, Error **errp)
         return;
     }
 
-    virtio_init(vdev, "virtio-rng", VIRTIO_ID_RNG, 0);
+    virtio_init(vdev, VIRTIO_ID_RNG, 0);
 
     vrng->vq = virtio_add_queue(vdev, 8, handle_input);
     vrng->quota_remaining = vrng->conf.max_bytes;
@@ -242,13 +243,13 @@ static const VMStateDescription vmstate_virtio_rng = {
     .name = "virtio-rng",
     .minimum_version_id = 1,
     .version_id = 1,
-    .fields = (VMStateField[]) {
+    .fields = (const VMStateField[]) {
         VMSTATE_VIRTIO_DEVICE,
         VMSTATE_END_OF_LIST()
     },
 };
 
-static Property virtio_rng_properties[] = {
+static const Property virtio_rng_properties[] = {
     /* Set a default rate limit of 2^47 bytes per minute or roughly 2TB/s.  If
      * you have an entropy source capable of generating more entropy than this
      * and you can pass it through via virtio-rng, then hats off to you.  Until
@@ -257,7 +258,6 @@ static Property virtio_rng_properties[] = {
     DEFINE_PROP_UINT64("max-bytes", VirtIORNG, conf.max_bytes, INT64_MAX),
     DEFINE_PROP_UINT32("period", VirtIORNG, conf.period_ms, 1 << 16),
     DEFINE_PROP_LINK("rng", VirtIORNG, conf.rng, TYPE_RNG_BACKEND, RngBackend *),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void virtio_rng_class_init(ObjectClass *klass, void *data)

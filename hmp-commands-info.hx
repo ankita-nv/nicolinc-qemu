@@ -1,8 +1,8 @@
-HXCOMM Use DEFHEADING() to define headings in both help text and rST.
-HXCOMM Text between SRST and ERST is copied to the rST version and
-HXCOMM discarded from C version.
-HXCOMM DEF(command, args, callback, arg_string, help) is used to construct
-HXCOMM monitor info commands
+HXCOMM See docs/devel/docs.rst for the format of this file.
+HXCOMM
+HXCOMM This file defines the contents of an array of HMPCommand structs
+HXCOMM which specify the name, behaviour and help text for HMP commands.
+HXCOMM Text between SRST and ERST is rST format documentation.
 HXCOMM HXCOMM can be used for comments, discarded from both rST and C.
 HXCOMM
 HXCOMM In this file, generally SRST fragments should have two extra
@@ -100,9 +100,11 @@ ERST
 
     {
         .name       = "registers",
-        .args_type  = "cpustate_all:-a",
-        .params     = "[-a]",
-        .help       = "show the cpu registers (-a: all - show register info for all cpus)",
+        .args_type  = "cpustate_all:-a,vcpu:i?",
+        .params     = "[-a|vcpu]",
+        .help       = "show the cpu registers (-a: show register info for all cpus;"
+                      " vcpu: specific vCPU to query; show the current CPU's registers if"
+                      " no argument is specified)",
         .cmd        = hmp_info_registers,
     },
 
@@ -125,21 +127,6 @@ ERST
 SRST
   ``info lapic``
     Show local APIC state
-ERST
-
-#if defined(TARGET_I386)
-    {
-        .name       = "ioapic",
-        .args_type  = "",
-        .params     = "",
-        .help       = "show io apic state",
-        .cmd        = hmp_info_io_apic,
-    },
-#endif
-
-SRST
-  ``info ioapic``
-    Show io APIC state
 ERST
 
     {
@@ -174,7 +161,7 @@ ERST
         .args_type  = "",
         .params     = "",
         .help       = "show the interrupts statistics (if available)",
-        .cmd        = hmp_info_irq,
+        .cmd_info_hrt = qmp_x_query_irq,
     },
 
 SRST
@@ -187,25 +174,12 @@ ERST
         .args_type  = "",
         .params     = "",
         .help       = "show PIC state",
-        .cmd        = hmp_info_pic,
+        .cmd_info_hrt = qmp_x_query_interrupt_controllers,
     },
 
 SRST
   ``info pic``
     Show PIC state.
-ERST
-
-    {
-        .name       = "rdma",
-        .args_type  = "",
-        .params     = "",
-        .help       = "show RDMA state",
-        .cmd        = hmp_info_rdma,
-    },
-
-SRST
-  ``info rdma``
-    Show RDMA state.
 ERST
 
     {
@@ -340,7 +314,7 @@ ERST
         .args_type  = "",
         .params     = "",
         .help       = "show NUMA information",
-        .cmd        = hmp_info_numa,
+        .cmd_info_hrt = qmp_x_query_numa,
     },
 
 SRST
@@ -353,7 +327,7 @@ ERST
         .args_type  = "",
         .params     = "",
         .help       = "show guest USB devices",
-        .cmd        = hmp_info_usb,
+        .cmd_info_hrt = qmp_x_query_usb,
     },
 
 SRST
@@ -371,19 +345,6 @@ ERST
 SRST
   ``info usbhost``
     Show host USB devices.
-ERST
-
-    {
-        .name       = "profile",
-        .args_type  = "",
-        .params     = "",
-        .help       = "show profiling information",
-        .cmd        = hmp_info_profile,
-    },
-
-SRST
-  ``info profile``
-    Show profiling information.
 ERST
 
     {
@@ -566,9 +527,9 @@ ERST
 
     {
         .name       = "qtree",
-        .args_type  = "",
-        .params     = "",
-        .help       = "show device tree",
+        .args_type  = "brief:-b",
+        .params     = "[-b]",
+        .help       = "show device tree (-b: brief, omit properties)",
         .cmd        = hmp_info_qtree,
     },
 
@@ -609,7 +570,7 @@ ERST
         .args_type  = "",
         .params     = "",
         .help       = "show roms",
-        .cmd        = hmp_info_roms,
+        .cmd_info_hrt = qmp_x_query_roms,
     },
 
 SRST
@@ -787,7 +748,7 @@ ERST
         .args_type  = "",
         .params     = "",
         .help       = "Display system ramblock information",
-        .cmd        = hmp_info_ramblock,
+        .cmd_info_hrt = qmp_x_query_ramblock,
     },
 
 SRST
@@ -876,4 +837,145 @@ ERST
 SRST
   ``info dirty_rate``
     Display the vcpu dirty rate information.
+ERST
+
+    {
+        .name       = "vcpu_dirty_limit",
+        .args_type  = "",
+        .params     = "",
+        .help       = "show dirty page limit information of all vCPU",
+        .cmd        = hmp_info_vcpu_dirty_limit,
+    },
+
+SRST
+  ``info vcpu_dirty_limit``
+    Display the vcpu dirty page limit information.
+ERST
+
+#if defined(TARGET_I386)
+    {
+        .name       = "sgx",
+        .args_type  = "",
+        .params     = "",
+        .help       = "show intel SGX information",
+        .cmd        = hmp_info_sgx,
+    },
+#endif
+
+SRST
+  ``info sgx``
+    Show intel SGX information.
+ERST
+
+#if defined(CONFIG_MOS6522)
+    {
+        .name         = "via",
+        .args_type    = "",
+        .params       = "",
+        .help         = "show guest mos6522 VIA devices",
+        .cmd          = hmp_info_via,
+    },
+#endif
+
+SRST
+  ``info via``
+    Show guest mos6522 VIA devices.
+ERST
+
+    {
+        .name       = "stats",
+        .args_type  = "target:s,names:s?,provider:s?",
+        .params     = "target [names] [provider]",
+        .help       = "show statistics for the given target (vm or vcpu); optionally filter by"
+                      "name (comma-separated list, or * for all) and provider",
+        .cmd        = hmp_info_stats,
+    },
+
+SRST
+  ``info stats``
+    Show runtime-collected statistics
+ERST
+
+    {
+        .name      = "virtio",
+        .args_type = "",
+        .params    = "",
+        .help      = "List all available virtio devices",
+        .cmd       = hmp_virtio_query,
+        .flags     = "p",
+    },
+
+SRST
+  ``info virtio``
+    List all available virtio devices
+ERST
+
+    {
+        .name      = "virtio-status",
+        .args_type = "path:s",
+        .params    = "path",
+        .help      = "Display status of a given virtio device",
+        .cmd       = hmp_virtio_status,
+        .flags     = "p",
+    },
+
+SRST
+  ``info virtio-status`` *path*
+    Display status of a given virtio device
+ERST
+
+    {
+        .name      = "virtio-queue-status",
+        .args_type = "path:s,queue:i",
+        .params    = "path queue",
+        .help      = "Display status of a given virtio queue",
+        .cmd       = hmp_virtio_queue_status,
+        .flags     = "p",
+    },
+
+SRST
+  ``info virtio-queue-status`` *path* *queue*
+    Display status of a given virtio queue
+ERST
+
+    {
+        .name      = "virtio-vhost-queue-status",
+        .args_type = "path:s,queue:i",
+        .params    = "path queue",
+        .help      = "Display status of a given vhost queue",
+        .cmd       = hmp_vhost_queue_status,
+        .flags     = "p",
+    },
+
+SRST
+  ``info virtio-vhost-queue-status`` *path* *queue*
+    Display status of a given vhost queue
+ERST
+
+    {
+        .name       = "virtio-queue-element",
+        .args_type  = "path:s,queue:i,index:i?",
+        .params     = "path queue [index]",
+        .help       = "Display element of a given virtio queue",
+        .cmd        = hmp_virtio_queue_element,
+        .flags      = "p",
+    },
+
+SRST
+  ``info virtio-queue-element`` *path* *queue* [*index*]
+    Display element of a given virtio queue
+ERST
+
+    {
+        .name       = "cryptodev",
+        .args_type  = "",
+        .params     = "",
+        .help       = "show the crypto devices",
+        .cmd        = hmp_info_cryptodev,
+        .flags      = "p",
+    },
+
+SRST
+  ``info cryptodev``
+    Show the crypto devices.
 ERST

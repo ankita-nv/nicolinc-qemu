@@ -114,7 +114,10 @@ static void virtio_input_host_realize(DeviceState *dev, Error **errp)
         error_setg_file_open(errp, errno, vih->evdev);
         return;
     }
-    qemu_set_nonblock(vih->fd);
+    if (!g_unix_set_fd_nonblocking(vih->fd, true, NULL)) {
+        error_setg_errno(errp, errno, "Failed to set FD nonblocking");
+        goto err_close;
+    }
 
     rc = ioctl(vih->fd, EVIOCGVERSION, &ver);
     if (rc < 0) {
@@ -218,9 +221,8 @@ static const VMStateDescription vmstate_virtio_input_host = {
     .unmigratable = 1,
 };
 
-static Property virtio_input_host_properties[] = {
+static const Property virtio_input_host_properties[] = {
     DEFINE_PROP_STRING("evdev", VirtIOInputHost, evdev),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void virtio_input_host_class_init(ObjectClass *klass, void *data)

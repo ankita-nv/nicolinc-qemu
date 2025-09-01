@@ -11,7 +11,7 @@
  */
 
 #include "qemu/osdep.h"
-#include "sysemu/rng.h"
+#include "system/rng.h"
 #include "chardev/char-fe.h"
 #include "qapi/error.h"
 #include "qapi/qmp/qerror.h"
@@ -116,7 +116,7 @@ static void rng_egd_set_chardev(Object *obj, const char *value, Error **errp)
     RngEgd *s = RNG_EGD(b);
 
     if (b->opened) {
-        error_setg(errp, QERR_PERMISSION_DENIED);
+        error_setg(errp, "Property 'chardev' can no longer be set");
     } else {
         g_free(s->chr_name);
         s->chr_name = g_strdup(value);

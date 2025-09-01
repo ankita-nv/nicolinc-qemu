@@ -13,7 +13,7 @@
 
 #include "qemu/osdep.h"
 
-#include "virtio-pci.h"
+#include "hw/virtio/virtio-pci.h"
 #include "hw/qdev-properties.h"
 #include "hw/virtio/vhost-vsock.h"
 #include "qemu/module.h"
@@ -35,9 +35,8 @@ struct VHostVSockPCI {
 
 /* vhost-vsock-pci */
 
-static Property vhost_vsock_pci_properties[] = {
+static const Property vhost_vsock_pci_properties[] = {
     DEFINE_PROP_UINT32("vectors", VirtIOPCIProxy, nvectors, 3),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void vhost_vsock_pci_realize(VirtIOPCIProxy *vpci_dev, Error **errp)

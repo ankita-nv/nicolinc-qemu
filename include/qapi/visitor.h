@@ -16,6 +16,7 @@
 #define QAPI_VISITOR_H
 
 #include "qapi/qapi-builtin-types.h"
+#include "qapi/qapi-types-compat.h"
 
 /*
  * The QAPI schema defines both a set of C data types, and a QMP wire
@@ -38,7 +39,7 @@
  * limitations; see the documentation for each visitor for more
  * details on what it supports.  Also, see visitor-impl.h for the
  * callback contracts implemented by each visitor, and
- * docs/devel/qapi-code-gen.txt for more about the QAPI code
+ * docs/devel/qapi-code-gen.rst for more about the QAPI code
  * generator.
  *
  * All of the visitors are created via:
@@ -460,22 +461,39 @@ void visit_end_alternate(Visitor *v, void **obj);
 bool visit_optional(Visitor *v, const char *name, bool *present);
 
 /*
- * Should we reject deprecated member @name?
+ * Should we reject member @name due to policy?
+ *
+ * @features is the member's special features encoded as a
+ * bitset of QapiFeature.
  *
  * @name must not be NULL.  This function is only useful between
  * visit_start_struct() and visit_end_struct(), since only objects
  * have deprecated members.
  */
-bool visit_deprecated_accept(Visitor *v, const char *name, Error **errp);
+bool visit_policy_reject(Visitor *v, const char *name,
+                         uint64_t features, Error **errp);
 
 /*
- * Should we visit deprecated member @name?
+ *
+ * Should we skip member @name due to policy?
+ *
+ * @features is the member's special features encoded as a
+ * bitset of QapiFeature.
  *
  * @name must not be NULL.  This function is only useful between
  * visit_start_struct() and visit_end_struct(), since only objects
  * have deprecated members.
  */
-bool visit_deprecated(Visitor *v, const char *name);
+bool visit_policy_skip(Visitor *v, const char *name,
+                       uint64_t features);
+
+/*
+ * Set policy for handling deprecated management interfaces.
+ *
+ * Intended use: call visit_set_policy(v, &compat_policy) when
+ * visiting management interface input or output.
+ */
+void visit_set_policy(Visitor *v, CompatPolicy *policy);
 
 /*
  * Visit an enum value.

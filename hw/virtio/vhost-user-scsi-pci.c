@@ -29,8 +29,8 @@
 #include "hw/pci/msi.h"
 #include "hw/pci/msix.h"
 #include "hw/loader.h"
-#include "sysemu/kvm.h"
-#include "virtio-pci.h"
+#include "system/kvm.h"
+#include "hw/virtio/virtio-pci.h"
 #include "qom/object.h"
 
 typedef struct VHostUserSCSIPCI VHostUserSCSIPCI;
@@ -44,10 +44,9 @@ struct VHostUserSCSIPCI {
     VHostUserSCSI vdev;
 };
 
-static Property vhost_user_scsi_pci_properties[] = {
+static const Property vhost_user_scsi_pci_properties[] = {
     DEFINE_PROP_UINT32("vectors", VirtIOPCIProxy, nvectors,
                        DEV_NVECTORS_UNSPECIFIED),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void vhost_user_scsi_pci_realize(VirtIOPCIProxy *vpci_dev, Error **errp)

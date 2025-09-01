@@ -1,9 +1,20 @@
 #ifndef QEMU_IRQ_H
 #define QEMU_IRQ_H
 
+#include "qom/object.h"
+
 /* Generic IRQ/GPIO pin infrastructure.  */
 
 #define TYPE_IRQ "irq"
+OBJECT_DECLARE_SIMPLE_TYPE(IRQState, IRQ)
+
+struct IRQState {
+    Object parent_obj;
+
+    qemu_irq_handler handler;
+    void *opaque;
+    int n;
+};
 
 void qemu_set_irq(qemu_irq irq, int level);
 
@@ -22,6 +33,24 @@ static inline void qemu_irq_pulse(qemu_irq irq)
     qemu_set_irq(irq, 1);
     qemu_set_irq(irq, 0);
 }
+
+/*
+ * Init a single IRQ. The irq is assigned with a handler, an opaque data
+ * and the interrupt number.
+ */
+void qemu_init_irq(IRQState *irq, qemu_irq_handler handler, void *opaque,
+                   int n);
+
+/**
+ * qemu_init_irqs: Initialize an array of IRQs.
+ *
+ * @irq: Array of IRQs to initialize
+ * @count: number of IRQs to initialize
+ * @handler: handler to assign to each IRQ
+ * @opaque: opaque data to pass to @handler
+ */
+void qemu_init_irqs(IRQState irq[], size_t count,
+                    qemu_irq_handler handler, void *opaque);
 
 /* Returns an array of N IRQs. Each IRQ is assigned the argument handler and
  * opaque data.
@@ -45,11 +74,6 @@ void qemu_free_irq(qemu_irq irq);
 
 /* Returns a new IRQ with opposite polarity.  */
 qemu_irq qemu_irq_invert(qemu_irq irq);
-
-/* Returns a new IRQ which feeds into both the passed IRQs.
- * It's probably better to use the TYPE_SPLIT_IRQ device instead.
- */
-qemu_irq qemu_irq_split(qemu_irq irq1, qemu_irq irq2);
 
 /* For internal use in qtest.  Similar to qemu_irq_split, but operating
    on an existing vector of qemu_irq.  */

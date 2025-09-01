@@ -34,8 +34,9 @@
 #include "qemu/notify.h"
 #include "hw/boards.h"
 #include "hw/arm/boot.h"
+#include "hw/arm/bsa.h"
 #include "hw/block/flash.h"
-#include "sysemu/kvm.h"
+#include "system/kvm.h"
 #include "hw/intc/arm_gicv3_common.h"
 #include "qom/object.h"
 
@@ -43,19 +44,14 @@
 #define NUM_VIRTIO_TRANSPORTS 32
 #define NUM_SMMU_IRQS          4
 
-#define ARCH_GIC_MAINT_IRQ  9
-
-#define ARCH_TIMER_VIRT_IRQ   11
-#define ARCH_TIMER_S_EL1_IRQ  13
-#define ARCH_TIMER_NS_EL1_IRQ 14
-#define ARCH_TIMER_NS_EL2_IRQ 10
-
-#define VIRTUAL_PMU_IRQ 7
-
-#define PPI(irq) ((irq) + 16)
-
 /* See Linux kernel arch/arm64/include/asm/pvclock-abi.h */
 #define PVTIME_SIZE_PER_CPU 64
+
+/* GPIO pins */
+#define GPIO_PIN_POWER_BUTTON  3
+
+/* MMIO region size for SMMUv3 */
+#define SMMU_IO_LEN         (0x20000)
 
 enum {
     VIRT_FLASH,
@@ -69,7 +65,8 @@ enum {
     VIRT_GIC_ITS,
     VIRT_GIC_REDIST,
     VIRT_SMMU,
-    VIRT_UART,
+    VIRT_NESTED_SMMU,
+    VIRT_UART0,
     VIRT_MMIO,
     VIRT_RTC,
     VIRT_FW_CFG,
@@ -79,7 +76,7 @@ enum {
     VIRT_PCIE_ECAM,
     VIRT_PLATFORM_BUS,
     VIRT_GPIO,
-    VIRT_SECURE_UART,
+    VIRT_UART1,
     VIRT_SECURE_MEM,
     VIRT_SECURE_GPIO,
     VIRT_PCDIMM_ACPI,
@@ -99,6 +96,7 @@ enum {
 typedef enum VirtIOMMUType {
     VIRT_IOMMU_NONE,
     VIRT_IOMMU_SMMUV3,
+    VIRT_IOMMU_NESTED_SMMUV3,
     VIRT_IOMMU_VIRTIO,
 } VirtIOMMUType;
 
@@ -109,27 +107,48 @@ typedef enum VirtMSIControllerType {
 } VirtMSIControllerType;
 
 typedef enum VirtGICType {
-    VIRT_GIC_VERSION_MAX,
-    VIRT_GIC_VERSION_HOST,
-    VIRT_GIC_VERSION_2,
-    VIRT_GIC_VERSION_3,
+    VIRT_GIC_VERSION_MAX = 0,
+    VIRT_GIC_VERSION_HOST = 1,
+    /* The concrete GIC values have to match the GIC version number */
+    VIRT_GIC_VERSION_2 = 2,
+    VIRT_GIC_VERSION_3 = 3,
+    VIRT_GIC_VERSION_4 = 4,
     VIRT_GIC_VERSION_NOSEL,
 } VirtGICType;
+
+#define VIRT_GIC_VERSION_2_MASK BIT(VIRT_GIC_VERSION_2)
+#define VIRT_GIC_VERSION_3_MASK BIT(VIRT_GIC_VERSION_3)
+#define VIRT_GIC_VERSION_4_MASK BIT(VIRT_GIC_VERSION_4)
 
 struct VirtMachineClass {
     MachineClass parent;
     bool disallow_affinity_adjustment;
     bool no_its;
+    bool no_tcg_its;
     bool no_pmu;
     bool claim_edge_triggered_timers;
     bool smbios_old_sys_ver;
+    bool no_highmem_compact;
     bool no_highmem_ecam;
-    bool no_ged;   /* Machines < 4.2 has no support for ACPI GED device */
+    bool no_ged;   /* Machines < 4.2 have no support for ACPI GED device */
     bool kvm_no_adjvtime;
     bool no_kvm_steal_time;
     bool acpi_expose_flash;
     bool no_secure_gpio;
+    /* Machines < 6.2 have no support for describing cpu topology to guest */
+    bool no_cpu_topology;
+    bool no_tcg_lpa2;
+    bool no_ns_el2_virt_timer_irq;
+    bool no_nested_smmu;
 };
+
+typedef struct VirtNestedSmmu {
+    int index;
+    char *smmu_node;
+    PCIBus *pci_bus;
+    int reserved_bus_nums;
+    QLIST_ENTRY(VirtNestedSmmu) next;
+} VirtNestedSmmu;
 
 struct VirtMachineState {
     MachineState parent;
@@ -139,11 +158,18 @@ struct VirtMachineState {
     PFlashCFI01 *flash[2];
     bool secure;
     bool highmem;
+    bool highmem_compact;
     bool highmem_ecam;
+    bool highmem_mmio;
+    bool highmem_redists;
     bool its;
+    bool tcg_its;
     bool virt;
     bool ras;
     bool mte;
+    bool dtb_randomness;
+    bool second_ns_uart_present;
+    int num_nested_smmus;
     OnOffAuto acpi;
     VirtGICType gic_version;
     VirtIOMMUType iommu;
@@ -159,6 +185,7 @@ struct VirtMachineState {
     uint32_t gic_phandle;
     uint32_t msi_phandle;
     uint32_t iommu_phandle;
+    uint32_t *nested_smmu_phandle;
     int psci_conduit;
     hwaddr highest_gpa;
     DeviceState *gic;
@@ -167,6 +194,8 @@ struct VirtMachineState {
     PCIBus *bus;
     char *oem_id;
     char *oem_table_id;
+    bool ns_el2_virt_timer_irq;
+    QLIST_HEAD(, VirtNestedSmmu) nested_smmu_list;
 };
 
 #define VIRT_ECAM_ID(high) (high ? VIRT_HIGH_PCIE_ECAM : VIRT_PCIE_ECAM)
@@ -177,15 +206,73 @@ OBJECT_DECLARE_TYPE(VirtMachineState, VirtMachineClass, VIRT_MACHINE)
 void virt_acpi_setup(VirtMachineState *vms);
 bool virt_is_acpi_enabled(VirtMachineState *vms);
 
+/* Return number of redistributors that fit in the specified region */
+static uint32_t virt_redist_capacity(VirtMachineState *vms, int region)
+{
+    uint32_t redist_size;
+
+    if (vms->gic_version == VIRT_GIC_VERSION_3) {
+        redist_size = GICV3_REDIST_SIZE;
+    } else {
+        redist_size = GICV4_REDIST_SIZE;
+    }
+    return vms->memmap[region].size / redist_size;
+}
+
 /* Return the number of used redistributor regions  */
 static inline int virt_gicv3_redist_region_count(VirtMachineState *vms)
 {
-    uint32_t redist0_capacity =
-                vms->memmap[VIRT_GIC_REDIST].size / GICV3_REDIST_SIZE;
+    uint32_t redist0_capacity = virt_redist_capacity(vms, VIRT_GIC_REDIST);
 
-    assert(vms->gic_version == VIRT_GIC_VERSION_3);
+    assert(vms->gic_version != VIRT_GIC_VERSION_2);
 
-    return MACHINE(vms)->smp.cpus > redist0_capacity ? 2 : 1;
+    return (MACHINE(vms)->smp.cpus > redist0_capacity &&
+            vms->highmem_redists) ? 2 : 1;
+}
+
+static inline bool virt_has_smmuv3(const VirtMachineState *vms)
+{
+    return vms->iommu == VIRT_IOMMU_SMMUV3 ||
+           vms->iommu == VIRT_IOMMU_NESTED_SMMUV3;
+}
+
+static inline VirtNestedSmmu *
+find_nested_smmu_by_index(VirtMachineState *vms, int index)
+{
+    VirtNestedSmmu *nested_smmu;
+
+    QLIST_FOREACH(nested_smmu, &vms->nested_smmu_list, next) {
+        if (nested_smmu->index == index) {
+            return nested_smmu;
+        }
+    }
+    return NULL;
+}
+
+static inline VirtNestedSmmu *
+find_nested_smmu_by_sysfs(VirtMachineState *vms, char *node)
+{
+    VirtNestedSmmu *nested_smmu;
+
+    QLIST_FOREACH(nested_smmu, &vms->nested_smmu_list, next) {
+        if (!strncmp(nested_smmu->smmu_node, node, strlen(node))) {
+            return nested_smmu;
+        }
+    }
+    return NULL;
+}
+
+static inline VirtNestedSmmu *
+find_nested_smmu_by_pci_bus(VirtMachineState *vms, PCIBus *pci_bus)
+{
+    VirtNestedSmmu *nested_smmu;
+
+    QLIST_FOREACH(nested_smmu, &vms->nested_smmu_list, next) {
+        if (nested_smmu->pci_bus == pci_bus) {
+            return nested_smmu;
+        }
+    }
+    return NULL;
 }
 
 #endif /* QEMU_ARM_VIRT_H */

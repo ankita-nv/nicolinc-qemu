@@ -1,7 +1,8 @@
 #include "qemu/osdep.h"
+#include "qemu/error-report.h"
 #include "ui/egl-context.h"
 
-QEMUGLContext qemu_egl_create_context(DisplayChangeListener *dcl,
+QEMUGLContext qemu_egl_create_context(DisplayGLCtx *dgc,
                                       QEMUGLParams *params)
 {
    EGLContext ctx;
@@ -16,7 +17,7 @@ QEMUGLContext qemu_egl_create_context(DisplayChangeListener *dcl,
        EGL_CONTEXT_MINOR_VERSION_KHR, params->minor_ver,
        EGL_NONE
    };
-   bool gles = (qemu_egl_mode == DISPLAYGL_MODE_ES);
+   bool gles = (qemu_egl_mode == DISPLAY_GL_MODE_ES);
 
    ctx = eglCreateContext(qemu_egl_display, qemu_egl_config,
                           eglGetCurrentContext(),
@@ -24,14 +25,19 @@ QEMUGLContext qemu_egl_create_context(DisplayChangeListener *dcl,
    return ctx;
 }
 
-void qemu_egl_destroy_context(DisplayChangeListener *dcl, QEMUGLContext ctx)
+void qemu_egl_destroy_context(DisplayGLCtx *dgc, QEMUGLContext ctx)
 {
     eglDestroyContext(qemu_egl_display, ctx);
 }
 
-int qemu_egl_make_context_current(DisplayChangeListener *dcl,
+int qemu_egl_make_context_current(DisplayGLCtx *dgc,
                                   QEMUGLContext ctx)
 {
-   return eglMakeCurrent(qemu_egl_display,
-                         EGL_NO_SURFACE, EGL_NO_SURFACE, ctx);
+   if (!eglMakeCurrent(qemu_egl_display,
+                       EGL_NO_SURFACE, EGL_NO_SURFACE, ctx)) {
+        error_report("egl: eglMakeCurrent failed: %s", qemu_egl_get_error_string());
+        return -1;
+   }
+
+   return 0;
 }

@@ -18,19 +18,15 @@
 #ifndef HEXAGON_INTERNAL_H
 #define HEXAGON_INTERNAL_H
 
-/*
- * Change HEX_DEBUG to 1 to turn on debugging output
- */
-#define HEX_DEBUG 0
-#define HEX_DEBUG_LOG(...) \
-    do { \
-        if (HEX_DEBUG) { \
-            qemu_log(__VA_ARGS__); \
-        } \
-    } while (0)
+#include "qemu/log.h"
 
 int hexagon_gdb_read_register(CPUState *cpu, GByteArray *buf, int reg);
 int hexagon_gdb_write_register(CPUState *cpu, uint8_t *buf, int reg);
+int hexagon_hvx_gdb_read_register(CPUState *env, GByteArray *mem_buf, int n);
+int hexagon_hvx_gdb_write_register(CPUState *env, uint8_t *mem_buf, int n);
+
+void hexagon_debug_vreg(CPUHexagonState *env, int regnum);
+void hexagon_debug_qreg(CPUHexagonState *env, int regnum);
 void hexagon_debug(CPUHexagonState *env);
 
 extern const char * const hexagon_regnames[TOTAL_PER_THREAD_REGS];

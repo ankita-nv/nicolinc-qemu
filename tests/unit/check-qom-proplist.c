@@ -22,11 +22,12 @@
 
 #include "qapi/error.h"
 #include "qapi/qobject-input-visitor.h"
-#include "qapi/qmp/qdict.h"
-#include "qapi/qmp/qobject.h"
+#include "qobject/qdict.h"
+#include "qobject/qobject.h"
 #include "qom/object.h"
 #include "qemu/module.h"
 #include "qemu/option.h"
+#include "qemu/keyval.h"
 #include "qemu/config-file.h"
 #include "qom/object_interfaces.h"
 
@@ -488,7 +489,7 @@ static void test_dummy_badenum(void)
     g_assert(dobj == NULL);
     g_assert(err != NULL);
     g_assert_cmpstr(error_get_pretty(err), ==,
-                    "Invalid parameter 'yeti'");
+                    "Parameter 'av' does not accept value 'yeti'");
 
     g_assert(object_resolve_path_component(parent, "dummy0")
              == NULL);
@@ -609,7 +610,7 @@ static void test_dummy_delchild(void)
 static void test_qom_partial_path(void)
 {
     Object *root  = object_get_objects_root();
-    Object *cont1 = container_get(root, "/cont1");
+    Object *cont1 = object_property_add_new_container(root, "cont1");
     Object *obj1  = object_new(TYPE_DUMMY);
     Object *obj2a = object_new(TYPE_DUMMY);
     Object *obj2b = object_new(TYPE_DUMMY);

@@ -15,6 +15,15 @@
 #include "qapi/error.h"
 #include "qemu/module.h"
 #include "virtio-ccw.h"
+#include "hw/virtio/virtio-blk.h"
+
+#define TYPE_VIRTIO_BLK_CCW "virtio-blk-ccw"
+OBJECT_DECLARE_SIMPLE_TYPE(VirtIOBlkCcw, VIRTIO_BLK_CCW)
+
+struct VirtIOBlkCcw {
+    VirtioCcwDevice parent_obj;
+    VirtIOBlock vdev;
+};
 
 static void virtio_ccw_blk_realize(VirtioCcwDevice *ccw_dev, Error **errp)
 {
@@ -34,12 +43,12 @@ static void virtio_ccw_blk_instance_init(Object *obj)
                               "bootindex");
 }
 
-static Property virtio_ccw_blk_properties[] = {
+static const Property virtio_ccw_blk_properties[] = {
     DEFINE_PROP_BIT("ioeventfd", VirtioCcwDevice, flags,
                     VIRTIO_CCW_FLAG_USE_IOEVENTFD_BIT, true),
     DEFINE_PROP_UINT32("max_revision", VirtioCcwDevice, max_rev,
                        VIRTIO_CCW_MAX_REV),
-    DEFINE_PROP_END_OF_LIST(),
+    DEFINE_PROP_CCW_LOADPARM("loadparm", CcwDevice, loadparm),
 };
 
 static void virtio_ccw_blk_class_init(ObjectClass *klass, void *data)

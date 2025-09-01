@@ -28,8 +28,8 @@
 #include "qapi/error.h"
 #include "qapi/visitor.h"
 #include "qemu/module.h"
-#include "sysemu/hostmem.h"
-#include "sysemu/numa.h"
+#include "system/hostmem.h"
+#include "system/numa.h"
 #include "trace.h"
 
 static int pc_dimm_get_free_slot(const int *hint, int max_slots, Error **errp);
@@ -44,8 +44,7 @@ static MemoryRegion *pc_dimm_get_memory_region(PCDIMMDevice *dimm, Error **errp)
     return host_memory_backend_get_memory(dimm->hostmem);
 }
 
-void pc_dimm_pre_plug(PCDIMMDevice *dimm, MachineState *machine,
-                      const uint64_t *legacy_align, Error **errp)
+void pc_dimm_pre_plug(PCDIMMDevice *dimm, MachineState *machine, Error **errp)
 {
     Error *local_err = NULL;
     int slot;
@@ -70,8 +69,7 @@ void pc_dimm_pre_plug(PCDIMMDevice *dimm, MachineState *machine,
                             &error_abort);
     trace_mhp_pc_dimm_assigned_slot(slot);
 
-    memory_device_pre_plug(MEMORY_DEVICE(dimm), machine, legacy_align,
-                           errp);
+    memory_device_pre_plug(MEMORY_DEVICE(dimm), machine, errp);
 }
 
 void pc_dimm_plug(PCDIMMDevice *dimm, MachineState *machine)
@@ -81,6 +79,10 @@ void pc_dimm_plug(PCDIMMDevice *dimm, MachineState *machine)
 
     memory_device_plug(MEMORY_DEVICE(dimm), machine);
     vmstate_register_ram(vmstate_mr, DEVICE(dimm));
+    /* count only "real" DIMMs, not NVDIMMs */
+    if (!object_dynamic_cast(OBJECT(dimm), TYPE_NVDIMM)) {
+        machine->device_memory->dimm_size += memory_region_size(vmstate_mr);
+    }
 }
 
 void pc_dimm_unplug(PCDIMMDevice *dimm, MachineState *machine)
@@ -90,6 +92,9 @@ void pc_dimm_unplug(PCDIMMDevice *dimm, MachineState *machine)
 
     memory_device_unplug(MEMORY_DEVICE(dimm), machine);
     vmstate_unregister_ram(vmstate_mr, DEVICE(dimm));
+    if (!object_dynamic_cast(OBJECT(dimm), TYPE_NVDIMM)) {
+        machine->device_memory->dimm_size -= memory_region_size(vmstate_mr);
+    }
 }
 
 static int pc_dimm_slot2bitmap(Object *obj, void *opaque)
@@ -145,14 +150,13 @@ out:
     return slot;
 }
 
-static Property pc_dimm_properties[] = {
+static const Property pc_dimm_properties[] = {
     DEFINE_PROP_UINT64(PC_DIMM_ADDR_PROP, PCDIMMDevice, addr, 0),
     DEFINE_PROP_UINT32(PC_DIMM_NODE_PROP, PCDIMMDevice, node, 0),
     DEFINE_PROP_INT32(PC_DIMM_SLOT_PROP, PCDIMMDevice, slot,
                       PC_DIMM_UNASSIGNED_SLOT),
     DEFINE_PROP_LINK(PC_DIMM_MEMDEV_PROP, PCDIMMDevice, hostmem,
                      TYPE_MEMORY_BACKEND, HostMemoryBackend *),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void pc_dimm_get_size(Object *obj, Visitor *v, const char *name,
@@ -181,7 +185,21 @@ static void pc_dimm_realize(DeviceState *dev, Error **errp)
     PCDIMMDevice *dimm = PC_DIMM(dev);
     PCDIMMDeviceClass *ddc = PC_DIMM_GET_CLASS(dimm);
     MachineState *ms = MACHINE(qdev_get_machine());
-    int nb_numa_nodes = ms->numa_state->num_nodes;
+
+    if (ms->numa_state) {
+        int nb_numa_nodes = ms->numa_state->num_nodes;
+
+        if (((nb_numa_nodes > 0) && (dimm->node >= nb_numa_nodes)) ||
+            (!nb_numa_nodes && dimm->node)) {
+            error_setg(errp, "'DIMM property " PC_DIMM_NODE_PROP " has value %"
+                       PRIu32 "' which exceeds the number of numa nodes: %d",
+                       dimm->node, nb_numa_nodes ? nb_numa_nodes : 1);
+            return;
+        }
+    } else if (dimm->node > 0) {
+        error_setg(errp, "machine doesn't support NUMA");
+        return;
+    }
 
     if (!dimm->hostmem) {
         error_setg(errp, "'" PC_DIMM_MEMDEV_PROP "' property is not set");
@@ -189,13 +207,6 @@ static void pc_dimm_realize(DeviceState *dev, Error **errp)
     } else if (host_memory_backend_is_mapped(dimm->hostmem)) {
         error_setg(errp, "can't use already busy memdev: %s",
                    object_get_canonical_path_component(OBJECT(dimm->hostmem)));
-        return;
-    }
-    if (((nb_numa_nodes > 0) && (dimm->node >= nb_numa_nodes)) ||
-        (!nb_numa_nodes && dimm->node)) {
-        error_setg(errp, "'DIMM property " PC_DIMM_NODE_PROP " has value %"
-                   PRIu32 "' which exceeds the number of numa nodes: %d",
-                   dimm->node, nb_numa_nodes ? nb_numa_nodes : 1);
         return;
     }
 
@@ -209,6 +220,11 @@ static void pc_dimm_realize(DeviceState *dev, Error **errp)
 static void pc_dimm_unrealize(DeviceState *dev)
 {
     PCDIMMDevice *dimm = PC_DIMM(dev);
+    PCDIMMDeviceClass *ddc = PC_DIMM_GET_CLASS(dimm);
+
+    if (ddc->unrealize) {
+        ddc->unrealize(dimm);
+    }
 
     host_memory_backend_set_mapped(dimm->hostmem, false);
 }
@@ -240,7 +256,6 @@ static void pc_dimm_md_fill_device_info(const MemoryDeviceState *md,
     const DeviceState *dev = DEVICE(md);
 
     if (dev->id) {
-        di->has_id = true;
         di->id = g_strdup(dev->id);
     }
     di->hotplugged = dev->hotplugged;
@@ -279,7 +294,7 @@ static void pc_dimm_class_init(ObjectClass *oc, void *data)
     mdc->fill_device_info = pc_dimm_md_fill_device_info;
 }
 
-static TypeInfo pc_dimm_info = {
+static const TypeInfo pc_dimm_info = {
     .name          = TYPE_PC_DIMM,
     .parent        = TYPE_DEVICE,
     .instance_size = sizeof(PCDIMMDevice),

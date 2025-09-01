@@ -40,6 +40,11 @@ const char * const opcode_names[] = {
  *         Q6INSN(A2_add,"Rd32=add(Rs32,Rt32)",ATTRIBS(),
  *         "Add 32-bit registers",
  *         { RdV=RsV+RtV;})
+ *     HVX instructions have the following form
+ *         EXTINSN(V6_vinsertwr, "Vx32.w=vinsert(Rt32)",
+ *         ATTRIBS(A_EXTENSION,A_CVI,A_CVI_VX,A_CVI_LATE),
+ *         "Insert Word Scalar into Vector",
+ *         VxV.uw[0] = RtV;)
  */
 const char * const opcode_syntax[XX_LAST_OPCODE] = {
 #define Q6INSN(TAG, BEH, ATTRIBS, DESCR, SEM) \
@@ -49,24 +54,6 @@ const char * const opcode_syntax[XX_LAST_OPCODE] = {
 #include "imported/allidefs.def"
 #undef Q6INSN
 #undef EXTINSN
-};
-
-const char * const opcode_rregs[] = {
-#define REGINFO(TAG, REGINFO, RREGS, WREGS) RREGS,
-#define IMMINFO(TAG, SIGN, SIZE, SHAMT, SIGN2, SIZE2, SHAMT2)  /* nothing */
-#include "op_regs_generated.h.inc"
-    NULL
-#undef REGINFO
-#undef IMMINFO
-};
-
-const char * const opcode_wregs[] = {
-#define REGINFO(TAG, REGINFO, RREGS, WREGS) WREGS,
-#define IMMINFO(TAG, SIGN, SIZE, SHAMT, SIGN2, SIZE2, SHAMT2)  /* nothing */
-#include "op_regs_generated.h.inc"
-    NULL
-#undef REGINFO
-#undef IMMINFO
 };
 
 const OpcodeEncoding opcode_encodings[] = {
@@ -105,6 +92,14 @@ static const char *get_opcode_enc(int opcode)
 
 static const char *get_opcode_enc_class(int opcode)
 {
+    const char *tmp = opcode_encodings[opcode].encoding;
+    if (tmp == NULL) {
+        const char *test = "V6_";        /* HVX */
+        const char *name = opcode_names[opcode];
+        if (strncmp(name, test, strlen(test)) == 0) {
+            return "EXT_mmvec";
+        }
+    }
     return opcode_enc_class_names[opcode_encodings[opcode].enc_class];
 }
 
@@ -117,8 +112,6 @@ static void gen_iset_table(FILE *out)
         fprintf(out, "\t\'%s\' : {\n", opcode_names[i]);
         fprintf(out, "\t\t\'tag\' : \'%s\',\n", opcode_names[i]);
         fprintf(out, "\t\t\'syntax\' : \'%s\',\n", opcode_syntax[i]);
-        fprintf(out, "\t\t\'rregs\' : \'%s\',\n", opcode_rregs[i]);
-        fprintf(out, "\t\t\'wregs\' : \'%s\',\n", opcode_wregs[i]);
         fprintf(out, "\t\t\'enc\' : \'%s\',\n", get_opcode_enc(i));
         fprintf(out, "\t\t\'enc_class\' : \'%s\',\n", get_opcode_enc_class(i));
         fprintf(out, "\t},\n");
@@ -137,33 +130,6 @@ static void gen_tags_list(FILE *out)
     fprintf(out, "];\n\n");
 }
 
-static void gen_enc_ext_spaces_table(FILE *out)
-{
-    fprintf(out, "enc_ext_spaces = {\n");
-#define DEF_EXT_SPACE(SPACEID, ENCSTR) \
-    fprintf(out, "\t\'%s\' : \'%s\',\n", #SPACEID, ENCSTR);
-#include "imported/encode.def"
-#undef DEF_EXT_SPACE
-    fprintf(out, "};\n\n");
-}
-
-static void gen_subinsn_groupings_table(FILE *out)
-{
-    fprintf(out, "subinsn_groupings = {\n");
-#define DEF_PACKED32(TAG, TYPEA, TYPEB, ENCSTR) \
-    do { \
-        fprintf(out, "\t\'%s\' : {\n", #TAG); \
-        fprintf(out, "\t\t\'name\' : \'%s\',\n", #TAG); \
-        fprintf(out, "\t\t\'class_a\' : \'%s\',\n", #TYPEA); \
-        fprintf(out, "\t\t\'class_b\' : \'%s\',\n", #TYPEB); \
-        fprintf(out, "\t\t\'enc\' : \'%s\',\n", ENCSTR); \
-        fprintf(out, "\t},\n"); \
-    } while (0);
-#include "imported/encode.def"
-#undef DEF_PACKED32
-    fprintf(out, "};\n\n");
-}
-
 int main(int argc, char *argv[])
 {
     FILE *outfile;
@@ -180,8 +146,6 @@ int main(int argc, char *argv[])
 
     gen_iset_table(outfile);
     gen_tags_list(outfile);
-    gen_enc_ext_spaces_table(outfile);
-    gen_subinsn_groupings_table(outfile);
 
     fclose(outfile);
     return 0;

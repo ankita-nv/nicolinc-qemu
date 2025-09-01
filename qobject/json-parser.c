@@ -16,12 +16,12 @@
 #include "qemu/cutils.h"
 #include "qemu/unicode.h"
 #include "qapi/error.h"
-#include "qapi/qmp/qbool.h"
-#include "qapi/qmp/qdict.h"
-#include "qapi/qmp/qlist.h"
-#include "qapi/qmp/qnull.h"
-#include "qapi/qmp/qnum.h"
-#include "qapi/qmp/qstring.h"
+#include "qobject/qbool.h"
+#include "qobject/qdict.h"
+#include "qobject/qlist.h"
+#include "qobject/qnull.h"
+#include "qobject/qnum.h"
+#include "qobject/qstring.h"
 #include "json-parser-int.h"
 
 struct JSONToken {
@@ -54,7 +54,7 @@ static QObject *parse_value(JSONParserContext *ctxt);
 /**
  * Error handler
  */
-static void GCC_FMT_ATTR(3, 4) parse_error(JSONParserContext *ctxt,
+static void G_GNUC_PRINTF(3, 4) parse_error(JSONParserContext *ctxt,
                                            JSONToken *token, const char *msg, ...)
 {
     va_list ap;

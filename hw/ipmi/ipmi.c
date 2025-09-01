@@ -26,7 +26,7 @@
 #include "hw/ipmi/ipmi.h"
 #include "hw/qdev-properties.h"
 #include "qom/object_interfaces.h"
-#include "sysemu/runstate.h"
+#include "system/runstate.h"
 #include "qapi/error.h"
 #include "qemu/module.h"
 #include "hw/nmi.h"
@@ -85,7 +85,7 @@ static void ipmi_interface_class_init(ObjectClass *class, void *data)
     ik->do_hw_op = ipmi_do_hw_op;
 }
 
-static TypeInfo ipmi_interface_type_info = {
+static const TypeInfo ipmi_interface_type_info = {
     .name = TYPE_IPMI_INTERFACE,
     .parent = TYPE_INTERFACE,
     .class_size = sizeof(IPMIInterfaceClass),
@@ -108,9 +108,8 @@ void ipmi_bmc_find_and_link(Object *obj, Object **bmc)
                              OBJ_PROP_LINK_STRONG);
 }
 
-static Property ipmi_bmc_properties[] = {
+static const Property ipmi_bmc_properties[] = {
     DEFINE_PROP_UINT8("slave_addr",  IPMIBmc, slave_addr, 0x20),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void bmc_class_init(ObjectClass *oc, void *data)
@@ -120,7 +119,7 @@ static void bmc_class_init(ObjectClass *oc, void *data)
     device_class_set_props(dc, ipmi_bmc_properties);
 }
 
-static TypeInfo ipmi_bmc_type_info = {
+static const TypeInfo ipmi_bmc_type_info = {
     .name = TYPE_IPMI_BMC,
     .parent = TYPE_DEVICE,
     .instance_size = sizeof(IPMIBmc),

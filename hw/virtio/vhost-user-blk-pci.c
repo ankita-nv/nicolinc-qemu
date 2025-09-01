@@ -26,7 +26,7 @@
 #include "qapi/error.h"
 #include "qemu/error-report.h"
 #include "qemu/module.h"
-#include "virtio-pci.h"
+#include "hw/virtio/virtio-pci.h"
 #include "qom/object.h"
 
 typedef struct VHostUserBlkPCI VHostUserBlkPCI;
@@ -43,11 +43,10 @@ struct VHostUserBlkPCI {
     VHostUserBlk vdev;
 };
 
-static Property vhost_user_blk_pci_properties[] = {
+static const Property vhost_user_blk_pci_properties[] = {
     DEFINE_PROP_UINT32("class", VirtIOPCIProxy, class_code, 0),
     DEFINE_PROP_UINT32("vectors", VirtIOPCIProxy, nvectors,
                        DEV_NVECTORS_UNSPECIFIED),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void vhost_user_blk_pci_realize(VirtIOPCIProxy *vpci_dev, Error **errp)

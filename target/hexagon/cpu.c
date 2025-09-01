@@ -1,5 +1,5 @@
 /*
- *  Copyright(c) 2019-2021 Qualcomm Innovation Center, Inc. All Rights Reserved.
+ *  Copyright(c) 2019-2023 Qualcomm Innovation Center, Inc. All Rights Reserved.
  *
  *  This program is free software; you can redistribute it and/or modify
  *  it under the terms of the GNU General Public License as published by
@@ -20,13 +20,19 @@
 #include "cpu.h"
 #include "internal.h"
 #include "exec/exec-all.h"
+#include "exec/translation-block.h"
 #include "qapi/error.h"
 #include "hw/qdev-properties.h"
 #include "fpu/softfloat-helpers.h"
+#include "tcg/tcg.h"
+#include "exec/gdbstub.h"
 
-static void hexagon_v67_cpu_init(Object *obj)
-{
-}
+static void hexagon_v66_cpu_init(Object *obj) { }
+static void hexagon_v67_cpu_init(Object *obj) { }
+static void hexagon_v68_cpu_init(Object *obj) { }
+static void hexagon_v69_cpu_init(Object *obj) { }
+static void hexagon_v71_cpu_init(Object *obj) { }
+static void hexagon_v73_cpu_init(Object *obj) { }
 
 static ObjectClass *hexagon_cpu_class_by_name(const char *cpu_model)
 {
@@ -39,18 +45,16 @@ static ObjectClass *hexagon_cpu_class_by_name(const char *cpu_model)
     oc = object_class_by_name(typename);
     g_strfreev(cpuname);
     g_free(typename);
-    if (!oc || !object_class_dynamic_cast(oc, TYPE_HEXAGON_CPU) ||
-        object_class_is_abstract(oc)) {
-        return NULL;
-    }
+
     return oc;
 }
 
-static Property hexagon_lldb_compat_property =
-    DEFINE_PROP_BOOL("lldb-compat", HexagonCPU, lldb_compat, false);
-static Property hexagon_lldb_stack_adjust_property =
-    DEFINE_PROP_UNSIGNED("lldb-stack-adjust", HexagonCPU, lldb_stack_adjust,
-                         0, qdev_prop_uint32, target_ulong);
+static const Property hexagon_cpu_properties[] = {
+    DEFINE_PROP_BOOL("lldb-compat", HexagonCPU, lldb_compat, false),
+    DEFINE_PROP_UNSIGNED("lldb-stack-adjust", HexagonCPU, lldb_stack_adjust, 0,
+                         qdev_prop_uint32, target_ulong),
+    DEFINE_PROP_BOOL("short-circuit", HexagonCPU, short_circuit, true),
+};
 
 const char * const hexagon_regnames[TOTAL_PER_THREAD_REGS] = {
    "r0", "r1",  "r2",  "r3",  "r4",   "r5",  "r6",  "r7",
@@ -59,7 +63,7 @@ const char * const hexagon_regnames[TOTAL_PER_THREAD_REGS] = {
   "r24", "r25", "r26", "r27", "r28",  "r29", "r30", "r31",
   "sa0", "lc0", "sa1", "lc1", "p3_0", "c5",  "m0",  "m1",
   "usr", "pc",  "ugp", "gp",  "cs0",  "cs1", "c14", "c15",
-  "c16", "c17", "c18", "c19", "pkt_cnt",  "insn_cnt", "c22", "c23",
+  "c16", "c17", "c18", "c19", "pkt_cnt",  "insn_cnt", "hvx_cnt", "c23",
   "c24", "c25", "c26", "c27", "c28",  "c29", "c30", "c31",
 };
 
@@ -86,7 +90,7 @@ static target_ulong adjust_stack_ptrs(CPUHexagonState *env, target_ulong addr)
     return addr;
 }
 
-/* HEX_REG_P3_0 (aka C4) is an alias for the predicate registers */
+/* HEX_REG_P3_0_ALIASED (aka C4) is an alias for the predicate registers */
 static target_ulong read_p3_0(CPUHexagonState *env)
 {
     int32_t control_reg = 0;
@@ -102,7 +106,7 @@ static void print_reg(FILE *f, CPUHexagonState *env, int regnum)
 {
     target_ulong value;
 
-    if (regnum == HEX_REG_P3_0) {
+    if (regnum == HEX_REG_P3_0_ALIASED) {
         value = read_p3_0(env);
     } else {
         value = regnum < 32 ? adjust_stack_ptrs(env, env->gpr[regnum])
@@ -113,7 +117,66 @@ static void print_reg(FILE *f, CPUHexagonState *env, int regnum)
                  hexagon_regnames[regnum], value);
 }
 
-static void hexagon_dump(CPUHexagonState *env, FILE *f)
+static void print_vreg(FILE *f, CPUHexagonState *env, int regnum,
+                       bool skip_if_zero)
+{
+    if (skip_if_zero) {
+        bool nonzero_found = false;
+        for (int i = 0; i < MAX_VEC_SIZE_BYTES; i++) {
+            if (env->VRegs[regnum].ub[i] != 0) {
+                nonzero_found = true;
+                break;
+            }
+        }
+        if (!nonzero_found) {
+            return;
+        }
+    }
+
+    qemu_fprintf(f, "  v%d = ( ", regnum);
+    qemu_fprintf(f, "0x%02x", env->VRegs[regnum].ub[MAX_VEC_SIZE_BYTES - 1]);
+    for (int i = MAX_VEC_SIZE_BYTES - 2; i >= 0; i--) {
+        qemu_fprintf(f, ", 0x%02x", env->VRegs[regnum].ub[i]);
+    }
+    qemu_fprintf(f, " )\n");
+}
+
+void hexagon_debug_vreg(CPUHexagonState *env, int regnum)
+{
+    print_vreg(stdout, env, regnum, false);
+}
+
+static void print_qreg(FILE *f, CPUHexagonState *env, int regnum,
+                       bool skip_if_zero)
+{
+    if (skip_if_zero) {
+        bool nonzero_found = false;
+        for (int i = 0; i < MAX_VEC_SIZE_BYTES / 8; i++) {
+            if (env->QRegs[regnum].ub[i] != 0) {
+                nonzero_found = true;
+                break;
+            }
+        }
+        if (!nonzero_found) {
+            return;
+        }
+    }
+
+    qemu_fprintf(f, "  q%d = ( ", regnum);
+    qemu_fprintf(f, "0x%02x",
+                 env->QRegs[regnum].ub[MAX_VEC_SIZE_BYTES / 8 - 1]);
+    for (int i = MAX_VEC_SIZE_BYTES / 8 - 2; i >= 0; i--) {
+        qemu_fprintf(f, ", 0x%02x", env->QRegs[regnum].ub[i]);
+    }
+    qemu_fprintf(f, " )\n");
+}
+
+void hexagon_debug_qreg(CPUHexagonState *env, int regnum)
+{
+    print_qreg(stdout, env, regnum, false);
+}
+
+static void hexagon_dump(CPUHexagonState *env, FILE *f, int flags)
 {
     HexagonCPU *cpu = env_archcpu(env);
 
@@ -139,7 +202,7 @@ static void hexagon_dump(CPUHexagonState *env, FILE *f)
     print_reg(f, env, HEX_REG_M0);
     print_reg(f, env, HEX_REG_M1);
     print_reg(f, env, HEX_REG_USR);
-    print_reg(f, env, HEX_REG_P3_0);
+    print_reg(f, env, HEX_REG_P3_0_ALIASED);
     print_reg(f, env, HEX_REG_GP);
     print_reg(f, env, HEX_REG_UGP);
     print_reg(f, env, HEX_REG_PC);
@@ -159,34 +222,44 @@ static void hexagon_dump(CPUHexagonState *env, FILE *f)
     print_reg(f, env, HEX_REG_CS1);
 #endif
     qemu_fprintf(f, "}\n");
+
+    if (flags & CPU_DUMP_FPU) {
+        qemu_fprintf(f, "Vector Registers = {\n");
+        for (int i = 0; i < NUM_VREGS; i++) {
+            print_vreg(f, env, i, true);
+        }
+        for (int i = 0; i < NUM_QREGS; i++) {
+            print_qreg(f, env, i, true);
+        }
+        qemu_fprintf(f, "}\n");
+    }
 }
 
 static void hexagon_dump_state(CPUState *cs, FILE *f, int flags)
 {
-    HexagonCPU *cpu = HEXAGON_CPU(cs);
-    CPUHexagonState *env = &cpu->env;
-
-    hexagon_dump(env, f);
+    hexagon_dump(cpu_env(cs), f, flags);
 }
 
 void hexagon_debug(CPUHexagonState *env)
 {
-    hexagon_dump(env, stdout);
+    hexagon_dump(env, stdout, CPU_DUMP_FPU);
 }
 
 static void hexagon_cpu_set_pc(CPUState *cs, vaddr value)
 {
-    HexagonCPU *cpu = HEXAGON_CPU(cs);
-    CPUHexagonState *env = &cpu->env;
-    env->gpr[HEX_REG_PC] = value;
+    cpu_env(cs)->gpr[HEX_REG_PC] = value;
+}
+
+static vaddr hexagon_cpu_get_pc(CPUState *cs)
+{
+    return cpu_env(cs)->gpr[HEX_REG_PC];
 }
 
 static void hexagon_cpu_synchronize_from_tb(CPUState *cs,
                                             const TranslationBlock *tb)
 {
-    HexagonCPU *cpu = HEXAGON_CPU(cs);
-    CPUHexagonState *env = &cpu->env;
-    env->gpr[HEX_REG_PC] = tb->pc;
+    tcg_debug_assert(!tcg_cflags_has(cs, CF_PCREL));
+    cpu_env(cs)->gpr[HEX_REG_PC] = tb->pc;
 }
 
 static bool hexagon_cpu_has_work(CPUState *cs)
@@ -194,23 +267,27 @@ static bool hexagon_cpu_has_work(CPUState *cs)
     return true;
 }
 
-void restore_state_to_opc(CPUHexagonState *env, TranslationBlock *tb,
-                          target_ulong *data)
+static void hexagon_restore_state_to_opc(CPUState *cs,
+                                         const TranslationBlock *tb,
+                                         const uint64_t *data)
 {
-    env->gpr[HEX_REG_PC] = data[0];
+    cpu_env(cs)->gpr[HEX_REG_PC] = data[0];
 }
 
-static void hexagon_cpu_reset(DeviceState *dev)
+static void hexagon_cpu_reset_hold(Object *obj, ResetType type)
 {
-    CPUState *cs = CPU(dev);
-    HexagonCPU *cpu = HEXAGON_CPU(cs);
-    HexagonCPUClass *mcc = HEXAGON_CPU_GET_CLASS(cpu);
-    CPUHexagonState *env = &cpu->env;
+    CPUState *cs = CPU(obj);
+    HexagonCPUClass *mcc = HEXAGON_CPU_GET_CLASS(obj);
+    CPUHexagonState *env = cpu_env(cs);
 
-    mcc->parent_reset(dev);
+    if (mcc->parent_phases.hold) {
+        mcc->parent_phases.hold(obj, type);
+    }
 
     set_default_nan_mode(1, &env->fp_status);
     set_float_detect_tininess(float_tininess_before_rounding, &env->fp_status);
+    /* Default NaN value: sign bit set, all frac bits set */
+    set_float_default_nan_pattern(0b11111111, &env->fp_status);
 }
 
 static void hexagon_cpu_disas_set_info(CPUState *s, disassemble_info *info)
@@ -230,6 +307,10 @@ static void hexagon_cpu_realize(DeviceState *dev, Error **errp)
         return;
     }
 
+    gdb_register_coprocessor(cs, hexagon_hvx_gdb_read_register,
+                             hexagon_hvx_gdb_write_register,
+                             gdb_find_static_feature("hexagon-hvx.xml"), 0);
+
     qemu_init_vcpu(cs);
     cpu_reset(cs);
 
@@ -238,41 +319,15 @@ static void hexagon_cpu_realize(DeviceState *dev, Error **errp)
 
 static void hexagon_cpu_init(Object *obj)
 {
-    HexagonCPU *cpu = HEXAGON_CPU(obj);
-
-    cpu_set_cpustate_pointers(cpu);
-    qdev_property_add_static(DEVICE(obj), &hexagon_lldb_compat_property);
-    qdev_property_add_static(DEVICE(obj), &hexagon_lldb_stack_adjust_property);
-}
-
-static bool hexagon_tlb_fill(CPUState *cs, vaddr address, int size,
-                             MMUAccessType access_type, int mmu_idx,
-                             bool probe, uintptr_t retaddr)
-{
-#ifdef CONFIG_USER_ONLY
-    switch (access_type) {
-    case MMU_INST_FETCH:
-        cs->exception_index = HEX_EXCP_FETCH_NO_UPAGE;
-        break;
-    case MMU_DATA_LOAD:
-        cs->exception_index = HEX_EXCP_PRIV_NO_UREAD;
-        break;
-    case MMU_DATA_STORE:
-        cs->exception_index = HEX_EXCP_PRIV_NO_UWRITE;
-        break;
-    }
-    cpu_loop_exit_restore(cs, retaddr);
-#else
-#error System mode not implemented for Hexagon
-#endif
 }
 
 #include "hw/core/tcg-cpu-ops.h"
 
-static const struct TCGCPUOps hexagon_tcg_ops = {
+static const TCGCPUOps hexagon_tcg_ops = {
     .initialize = hexagon_translate_init,
+    .translate_code = hexagon_translate_code,
     .synchronize_from_tb = hexagon_cpu_synchronize_from_tb,
-    .tlb_fill = hexagon_tlb_fill,
+    .restore_state_to_opc = hexagon_restore_state_to_opc,
 };
 
 static void hexagon_cpu_class_init(ObjectClass *c, void *data)
@@ -280,20 +335,24 @@ static void hexagon_cpu_class_init(ObjectClass *c, void *data)
     HexagonCPUClass *mcc = HEXAGON_CPU_CLASS(c);
     CPUClass *cc = CPU_CLASS(c);
     DeviceClass *dc = DEVICE_CLASS(c);
+    ResettableClass *rc = RESETTABLE_CLASS(c);
 
     device_class_set_parent_realize(dc, hexagon_cpu_realize,
                                     &mcc->parent_realize);
 
-    device_class_set_parent_reset(dc, hexagon_cpu_reset, &mcc->parent_reset);
+    device_class_set_props(dc, hexagon_cpu_properties);
+    resettable_class_set_parent_phases(rc, NULL, hexagon_cpu_reset_hold, NULL,
+                                       &mcc->parent_phases);
 
     cc->class_by_name = hexagon_cpu_class_by_name;
     cc->has_work = hexagon_cpu_has_work;
     cc->dump_state = hexagon_dump_state;
     cc->set_pc = hexagon_cpu_set_pc;
+    cc->get_pc = hexagon_cpu_get_pc;
     cc->gdb_read_register = hexagon_gdb_read_register;
     cc->gdb_write_register = hexagon_gdb_write_register;
-    cc->gdb_num_core_regs = TOTAL_PER_THREAD_REGS;
     cc->gdb_stop_before_watchpoint = true;
+    cc->gdb_core_xml_file = "hexagon-core.xml";
     cc->disas_set_info = hexagon_cpu_disas_set_info;
     cc->tcg_ops = &hexagon_tcg_ops;
 }
@@ -310,12 +369,18 @@ static const TypeInfo hexagon_cpu_type_infos[] = {
         .name = TYPE_HEXAGON_CPU,
         .parent = TYPE_CPU,
         .instance_size = sizeof(HexagonCPU),
+        .instance_align = __alignof(HexagonCPU),
         .instance_init = hexagon_cpu_init,
         .abstract = true,
         .class_size = sizeof(HexagonCPUClass),
         .class_init = hexagon_cpu_class_init,
     },
+    DEFINE_CPU(TYPE_HEXAGON_CPU_V66,              hexagon_v66_cpu_init),
     DEFINE_CPU(TYPE_HEXAGON_CPU_V67,              hexagon_v67_cpu_init),
+    DEFINE_CPU(TYPE_HEXAGON_CPU_V68,              hexagon_v68_cpu_init),
+    DEFINE_CPU(TYPE_HEXAGON_CPU_V69,              hexagon_v69_cpu_init),
+    DEFINE_CPU(TYPE_HEXAGON_CPU_V71,              hexagon_v71_cpu_init),
+    DEFINE_CPU(TYPE_HEXAGON_CPU_V73,              hexagon_v73_cpu_init),
 };
 
 DEFINE_TYPES(hexagon_cpu_type_infos)

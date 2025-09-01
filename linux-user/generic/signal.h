@@ -15,7 +15,6 @@
 #define TARGET_SA_RESTART       0x10000000
 #define TARGET_SA_NODEFER       0x40000000
 #define TARGET_SA_RESETHAND     0x80000000
-#define TARGET_SA_RESTORER      0x04000000
 
 #define TARGET_SIGHUP            1
 #define TARGET_SIGINT            2
@@ -54,6 +53,21 @@
 #define TARGET_SIG_BLOCK          0    /* for blocking signals */
 #define TARGET_SIG_UNBLOCK        1    /* for unblocking signals */
 #define TARGET_SIG_SETMASK        2    /* for setting the signal mask */
+
+/* this struct defines a stack used during syscall handling */
+typedef struct target_sigaltstack {
+    abi_ulong ss_sp;
+    abi_int ss_flags;
+    abi_ulong ss_size;
+} target_stack_t;
+
+/*
+ * sigaltstack controls
+ */
+#define TARGET_SS_ONSTACK 1
+#define TARGET_SS_DISABLE 2
+
+#define TARGET_MINSIGSTKSZ     2048
 
 /* bit-flags */
 #define TARGET_SS_AUTODISARM (1U << 31) /* disable sas during sighandling */

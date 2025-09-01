@@ -18,7 +18,6 @@
  */
 
 #include "qemu/osdep.h"
-#include "qemu-common.h"
 #include "qemu/datadir.h"
 #include "qapi/error.h"
 #include "hw/sysbus.h"
@@ -26,17 +25,18 @@
 #include "hw/arm/boot.h"
 #include "hw/loader.h"
 #include "net/net.h"
-#include "sysemu/runstate.h"
-#include "sysemu/sysemu.h"
+#include "system/runstate.h"
+#include "system/system.h"
 #include "hw/boards.h"
 #include "qemu/error-report.h"
 #include "hw/char/pl011.h"
-#include "hw/ide/ahci.h"
+#include "hw/ide/ahci-sysbus.h"
 #include "hw/cpu/a9mpcore.h"
 #include "hw/cpu/a15mpcore.h"
 #include "qemu/log.h"
 #include "qom/object.h"
 #include "cpu.h"
+#include "target/arm/cpu-qom.h"
 
 #define SMP_BOOT_ADDR           0x100
 #define SMP_BOOT_REG            0x40
@@ -45,69 +45,9 @@
 #define MVBAR_ADDR              0x200
 #define BOARD_SETUP_ADDR        (MVBAR_ADDR + 8 * sizeof(uint32_t))
 
-#define NIRQ_GIC                160
+#define GIC_EXT_IRQS            128 /* EnergyCore ECX-1000 & ECX-2000 */
 
 /* Board init.  */
-
-static void hb_write_board_setup(ARMCPU *cpu,
-                                 const struct arm_boot_info *info)
-{
-    arm_write_secure_board_setup_dummy_smc(cpu, info, MVBAR_ADDR);
-}
-
-static void hb_write_secondary(ARMCPU *cpu, const struct arm_boot_info *info)
-{
-    int n;
-    uint32_t smpboot[] = {
-        0xee100fb0, /* mrc p15, 0, r0, c0, c0, 5 - read current core id */
-        0xe210000f, /* ands r0, r0, #0x0f */
-        0xe3a03040, /* mov r3, #0x40 - jump address is 0x40 + 0x10 * core id */
-        0xe0830200, /* add r0, r3, r0, lsl #4 */
-        0xe59f2024, /* ldr r2, privbase */
-        0xe3a01001, /* mov r1, #1 */
-        0xe5821100, /* str r1, [r2, #256] - set GICC_CTLR.Enable */
-        0xe3a010ff, /* mov r1, #0xff */
-        0xe5821104, /* str r1, [r2, #260] - set GICC_PMR.Priority to 0xff */
-        0xf57ff04f, /* dsb */
-        0xe320f003, /* wfi */
-        0xe5901000, /* ldr     r1, [r0] */
-        0xe1110001, /* tst     r1, r1 */
-        0x0afffffb, /* beq     <wfi> */
-        0xe12fff11, /* bx      r1 */
-        MPCORE_PERIPHBASE   /* privbase: MPCore peripheral base address.  */
-    };
-    for (n = 0; n < ARRAY_SIZE(smpboot); n++) {
-        smpboot[n] = tswap32(smpboot[n]);
-    }
-    rom_add_blob_fixed_as("smpboot", smpboot, sizeof(smpboot), SMP_BOOT_ADDR,
-                          arm_boot_address_space(cpu, info));
-}
-
-static void hb_reset_secondary(ARMCPU *cpu, const struct arm_boot_info *info)
-{
-    CPUARMState *env = &cpu->env;
-
-    switch (info->nb_cpus) {
-    case 4:
-        address_space_stl_notdirty(&address_space_memory,
-                                   SMP_BOOT_REG + 0x30, 0,
-                                   MEMTXATTRS_UNSPECIFIED, NULL);
-        /* fallthrough */
-    case 3:
-        address_space_stl_notdirty(&address_space_memory,
-                                   SMP_BOOT_REG + 0x20, 0,
-                                   MEMTXATTRS_UNSPECIFIED, NULL);
-        /* fallthrough */
-    case 2:
-        address_space_stl_notdirty(&address_space_memory,
-                                   SMP_BOOT_REG + 0x10, 0,
-                                   MEMTXATTRS_UNSPECIFIED, NULL);
-        env->regs[15] = SMP_BOOT_ADDR;
-        break;
-    default:
-        break;
-    }
-}
 
 #define NUM_REGS      0x200
 static void hb_regs_write(void *opaque, hwaddr offset,
@@ -173,7 +113,7 @@ static const VMStateDescription vmstate_highbank_regs = {
     .name = "highbank-regs",
     .version_id = 0,
     .minimum_version_id = 0,
-    .fields = (VMStateField[]) {
+    .fields = (const VMStateField[]) {
         VMSTATE_UINT32_ARRAY(regs, HighbankRegsState, NUM_REGS),
         VMSTATE_END_OF_LIST(),
     },
@@ -205,7 +145,7 @@ static void highbank_regs_class_init(ObjectClass *klass, void *data)
 
     dc->desc = "Calxeda Highbank registers";
     dc->vmsd = &vmstate_highbank_regs;
-    dc->reset = highbank_regs_reset;
+    device_class_set_legacy_reset(dc, highbank_regs_reset);
 }
 
 static const TypeInfo highbank_regs_info = {
@@ -240,7 +180,7 @@ static void calxeda_init(MachineState *machine, enum cxmachines machine_id)
 {
     DeviceState *dev = NULL;
     SysBusDevice *busdev;
-    qemu_irq pic[128];
+    qemu_irq pic[GIC_EXT_IRQS];
     int n;
     unsigned int smp_cpus = machine->smp.cpus;
     qemu_irq cpu_irq[4];
@@ -259,7 +199,7 @@ static void calxeda_init(MachineState *machine, enum cxmachines machine_id)
         machine->cpu_type = ARM_CPU_TYPE_NAME("cortex-a15");
         break;
     default:
-        assert(0);
+        g_assert_not_reached();
     }
 
     for (n = 0; n < smp_cpus; n++) {
@@ -269,14 +209,9 @@ static void calxeda_init(MachineState *machine, enum cxmachines machine_id)
         cpuobj = object_new(machine->cpu_type);
         cpu = ARM_CPU(cpuobj);
 
+        object_property_add_child(OBJECT(machine), "cpu[*]", cpuobj);
         object_property_set_int(cpuobj, "psci-conduit", QEMU_PSCI_CONDUIT_SMC,
                                 &error_abort);
-
-        if (n) {
-            /* Secondary CPUs start in PSCI powered-down state */
-            object_property_set_bool(cpuobj, "start-powered-off", true,
-                                     &error_abort);
-        }
 
         if (object_property_find(cpuobj, "reset-cbar")) {
             object_property_set_int(cpuobj, "reset-cbar", MPCORE_PERIPHBASE,
@@ -325,7 +260,7 @@ static void calxeda_init(MachineState *machine, enum cxmachines machine_id)
         break;
     }
     qdev_prop_set_uint32(dev, "num-cpu", smp_cpus);
-    qdev_prop_set_uint32(dev, "num-irq", NIRQ_GIC);
+    qdev_prop_set_uint32(dev, "num-irq", GIC_EXT_IRQS + GIC_INTERNAL);
     busdev = SYS_BUS_DEVICE(dev);
     sysbus_realize_and_unref(busdev, &error_fatal);
     sysbus_mmio_map(busdev, 0, MPCORE_PERIPHBASE);
@@ -336,7 +271,7 @@ static void calxeda_init(MachineState *machine, enum cxmachines machine_id)
         sysbus_connect_irq(busdev, n + 3 * smp_cpus, cpu_vfiq[n]);
     }
 
-    for (n = 0; n < 128; n++) {
+    for (n = 0; n < GIC_EXT_IRQS; n++) {
         pic[n] = qdev_get_gpio_in(dev, n);
     }
 
@@ -363,19 +298,17 @@ static void calxeda_init(MachineState *machine, enum cxmachines machine_id)
 
     sysbus_create_simple(TYPE_SYSBUS_AHCI, 0xffe08000, pic[83]);
 
-    if (nd_table[0].used) {
-        qemu_check_nic_model(&nd_table[0], "xgmac");
-        dev = qdev_new("xgmac");
-        qdev_set_nic_properties(dev, &nd_table[0]);
+    dev = qemu_create_nic_device("xgmac", true, NULL);
+    if (dev) {
         sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
         sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, 0xfff50000);
         sysbus_connect_irq(SYS_BUS_DEVICE(dev), 0, pic[77]);
         sysbus_connect_irq(SYS_BUS_DEVICE(dev), 1, pic[78]);
         sysbus_connect_irq(SYS_BUS_DEVICE(dev), 2, pic[79]);
+    }
 
-        qemu_check_nic_model(&nd_table[1], "xgmac");
-        dev = qdev_new("xgmac");
-        qdev_set_nic_properties(dev, &nd_table[1]);
+    dev = qemu_create_nic_device("xgmac", true, NULL);
+    if (dev) {
         sysbus_realize_and_unref(SYS_BUS_DEVICE(dev), &error_fatal);
         sysbus_mmio_map(SYS_BUS_DEVICE(dev), 0, 0xfff51000);
         sysbus_connect_irq(SYS_BUS_DEVICE(dev), 0, pic[80]);
@@ -391,13 +324,9 @@ static void calxeda_init(MachineState *machine, enum cxmachines machine_id)
      * clear that the value is meaningless.
      */
     highbank_binfo.board_id = -1;
-    highbank_binfo.nb_cpus = smp_cpus;
     highbank_binfo.loader_start = 0;
-    highbank_binfo.write_secondary_boot = hb_write_secondary;
-    highbank_binfo.secondary_cpu_reset_hook = hb_reset_secondary;
     highbank_binfo.board_setup_addr = BOARD_SETUP_ADDR;
-    highbank_binfo.write_board_setup = hb_write_board_setup;
-    highbank_binfo.secure_board_setup = true;
+    highbank_binfo.psci_conduit = QEMU_PSCI_CONDUIT_SMC;
 
     arm_load_kernel(ARM_CPU(first_cpu), machine, &highbank_binfo);
 }
@@ -414,10 +343,15 @@ static void midway_init(MachineState *machine)
 
 static void highbank_class_init(ObjectClass *oc, void *data)
 {
+    static const char * const valid_cpu_types[] = {
+        ARM_CPU_TYPE_NAME("cortex-a9"),
+        NULL
+    };
     MachineClass *mc = MACHINE_CLASS(oc);
 
     mc->desc = "Calxeda Highbank (ECX-1000)";
     mc->init = highbank_init;
+    mc->valid_cpu_types = valid_cpu_types;
     mc->block_default_type = IF_IDE;
     mc->units_per_default_bus = 1;
     mc->max_cpus = 4;
@@ -433,10 +367,15 @@ static const TypeInfo highbank_type = {
 
 static void midway_class_init(ObjectClass *oc, void *data)
 {
+    static const char * const valid_cpu_types[] = {
+        ARM_CPU_TYPE_NAME("cortex-a15"),
+        NULL
+    };
     MachineClass *mc = MACHINE_CLASS(oc);
 
     mc->desc = "Calxeda Midway (ECX-2000)";
     mc->init = midway_init;
+    mc->valid_cpu_types = valid_cpu_types;
     mc->block_default_type = IF_IDE;
     mc->units_per_default_bus = 1;
     mc->max_cpus = 4;

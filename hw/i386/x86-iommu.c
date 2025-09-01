@@ -25,7 +25,7 @@
 #include "qapi/error.h"
 #include "qemu/error-report.h"
 #include "trace.h"
-#include "sysemu/kvm.h"
+#include "system/kvm.h"
 
 void x86_iommu_iec_register_notifier(X86IOMMUState *iommu,
                                      iec_notify_fn fn, void *data)
@@ -63,7 +63,7 @@ void x86_iommu_irq_to_msi_message(X86IOMMUIrq *irq, MSIMessage *msg_out)
     msg.redir_hint = irq->redir_hint;
     msg.dest = irq->dest;
     msg.__addr_hi = irq->dest & 0xffffff00;
-    msg.__addr_head = cpu_to_le32(0xfee);
+    msg.__addr_head = 0xfee;
     /* Keep this from original MSI address bits */
     msg.__not_used = irq->msi_addr_last_bits;
 
@@ -77,30 +77,17 @@ void x86_iommu_irq_to_msi_message(X86IOMMUIrq *irq, MSIMessage *msg_out)
     msg_out->data = msg.msi_data;
 }
 
-/* Default X86 IOMMU device */
-static X86IOMMUState *x86_iommu_default = NULL;
-
-static void x86_iommu_set_default(X86IOMMUState *x86_iommu)
-{
-    assert(x86_iommu);
-
-    if (x86_iommu_default) {
-        error_report("QEMU does not support multiple vIOMMUs "
-                     "for x86 yet.");
-        exit(1);
-    }
-
-    x86_iommu_default = x86_iommu;
-}
-
 X86IOMMUState *x86_iommu_get_default(void)
 {
-    return x86_iommu_default;
-}
+    MachineState *ms = MACHINE(qdev_get_machine());
+    PCMachineState *pcms =
+        PC_MACHINE(object_dynamic_cast(OBJECT(ms), TYPE_PC_MACHINE));
 
-IommuType x86_iommu_get_type(void)
-{
-    return x86_iommu_default->type;
+    if (pcms &&
+        object_dynamic_cast(OBJECT(pcms->iommu), TYPE_X86_IOMMU_DEVICE)) {
+        return X86_IOMMU_DEVICE(pcms->iommu);
+    }
+    return NULL;
 }
 
 static void x86_iommu_realize(DeviceState *dev, Error **errp)
@@ -114,7 +101,7 @@ static void x86_iommu_realize(DeviceState *dev, Error **errp)
     QLIST_INIT(&x86_iommu->iec_notifiers);
     bool irq_all_kernel = kvm_irqchip_in_kernel() && !kvm_irqchip_is_split();
 
-    if (!pcms || !pcms->bus) {
+    if (!pcms || !pcms->pcibus) {
         error_setg(errp, "Machine-type '%s' not supported by IOMMU",
                    mc->name);
         return;
@@ -136,16 +123,13 @@ static void x86_iommu_realize(DeviceState *dev, Error **errp)
     if (x86_class->realize) {
         x86_class->realize(dev, errp);
     }
-
-    x86_iommu_set_default(X86_IOMMU_DEVICE(dev));
 }
 
-static Property x86_iommu_properties[] = {
+static const Property x86_iommu_properties[] = {
     DEFINE_PROP_ON_OFF_AUTO("intremap", X86IOMMUState,
                             intr_supported, ON_OFF_AUTO_AUTO),
     DEFINE_PROP_BOOL("device-iotlb", X86IOMMUState, dt_supported, false),
     DEFINE_PROP_BOOL("pt", X86IOMMUState, pt_supported, true),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void x86_iommu_class_init(ObjectClass *klass, void *data)
@@ -162,7 +146,7 @@ bool x86_iommu_ir_supported(X86IOMMUState *s)
 
 static const TypeInfo x86_iommu_info = {
     .name          = TYPE_X86_IOMMU_DEVICE,
-    .parent        = TYPE_SYS_BUS_DEVICE,
+    .parent        = TYPE_DYNAMIC_SYS_BUS_DEVICE,
     .instance_size = sizeof(X86IOMMUState),
     .class_init    = x86_iommu_class_init,
     .class_size    = sizeof(X86IOMMUClass),

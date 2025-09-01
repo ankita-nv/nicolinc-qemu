@@ -12,7 +12,14 @@
 # See the COPYING file in the top-level directory.
 
 import re
-from typing import Match, Optional, Sequence
+from typing import (
+    Any,
+    Dict,
+    Match,
+    Optional,
+    Sequence,
+    Union,
+)
 
 
 #: Magic string that gets removed along with all space to its right.
@@ -33,22 +40,28 @@ def camel_to_upper(value: str) -> str:
         ENUM_Name2 -> ENUM_NAME2
         ENUM24_Name -> ENUM24_NAME
     """
-    c_fun_str = c_name(value, False)
-    if value.isupper():
-        return c_fun_str
+    ret = value[0]
+    upc = value[0].isupper()
 
-    new_name = ''
-    length = len(c_fun_str)
-    for i in range(length):
-        char = c_fun_str[i]
-        # When char is upper case and no '_' appears before, do more checks
-        if char.isupper() and (i > 0) and c_fun_str[i - 1] != '_':
-            if i < length - 1 and c_fun_str[i + 1].islower():
-                new_name += '_'
-            elif c_fun_str[i - 1].isdigit():
-                new_name += '_'
-        new_name += char
-    return new_name.lstrip('_').upper()
+    # Copy remainder of ``value`` to ``ret`` with '_' inserted
+    for ch in value[1:]:
+        if ch.isupper() == upc:
+            pass
+        elif upc:
+            # ``ret`` ends in upper case, next char isn't: insert '_'
+            # before the last upper case char unless there is one
+            # already, or it's at the beginning
+            if len(ret) > 2 and ret[-2].isalnum():
+                ret = ret[:-1] + '_' + ret[-1]
+        else:
+            # ``ret`` doesn't end in upper case, next char is: insert
+            # '_' before it
+            if ret[-1].isalnum():
+                ret += '_'
+        ret += ch
+        upc = ch.isupper()
+
+    return c_name(ret.upper()).lstrip('_')
 
 
 def c_enum_const(type_name: str,
@@ -61,9 +74,9 @@ def c_enum_const(type_name: str,
     :param const_name: The name of this constant.
     :param prefix: Optional, prefix that overrides the type_name.
     """
-    if prefix is not None:
-        type_name = prefix
-    return camel_to_upper(type_name) + '_' + c_name(const_name, False).upper()
+    if prefix is None:
+        prefix = camel_to_upper(type_name)
+    return prefix + '_' + c_name(const_name, False).upper()
 
 
 def c_name(name: str, protect: bool = True) -> str:
@@ -107,7 +120,7 @@ def c_name(name: str, protect: bool = True) -> str:
                      'and', 'and_eq', 'bitand', 'bitor', 'compl', 'not',
                      'not_eq', 'or', 'or_eq', 'xor', 'xor_eq'])
     # namespace pollution:
-    polluted_words = set(['unix', 'errno', 'mips', 'sparc', 'i386'])
+    polluted_words = set(['unix', 'errno', 'mips', 'sparc', 'i386', 'linux'])
     name = re.sub(r'[^A-Za-z0-9_]', '_', name)
     if protect and (name in (c89_words | c99_words | c11_words | gcc_words
                              | cpp_words | polluted_words)
@@ -125,9 +138,6 @@ class Indentation:
     def __init__(self, initial: int = 0) -> None:
         self._level = initial
 
-    def __int__(self) -> int:
-        return self._level
-
     def __repr__(self) -> str:
         return "{}({:d})".format(type(self).__name__, self._level)
 
@@ -135,19 +145,13 @@ class Indentation:
         """Return the current indentation as a string of spaces."""
         return ' ' * self._level
 
-    def __bool__(self) -> bool:
-        """True when there is a non-zero indentation."""
-        return bool(self._level)
-
     def increase(self, amount: int = 4) -> None:
         """Increase the indentation level by ``amount``, default 4."""
         self._level += amount
 
     def decrease(self, amount: int = 4) -> None:
         """Decrease the indentation level by ``amount``, default 4."""
-        if self._level < amount:
-            raise ArithmeticError(
-                f"Can't remove {amount:d} spaces from {self!r}")
+        assert amount <= self._level
         self._level -= amount
 
 
@@ -162,8 +166,9 @@ def cgen(code: str, **kwds: object) -> str:
     Obey `indent`, and strip `EATSPACE`.
     """
     raw = code % kwds
-    if indent:
-        raw = re.sub(r'^(?!(#|$))', str(indent), raw, flags=re.MULTILINE)
+    pfx = str(indent)
+    if pfx:
+        raw = re.sub(r'^(?!(#|$))', pfx, raw, flags=re.MULTILINE)
     return re.sub(re.escape(EATSPACE) + r' *', '', raw)
 
 
@@ -194,22 +199,56 @@ def guardend(name: str) -> str:
                  name=c_fname(name).upper())
 
 
-def gen_if(ifcond: Sequence[str]) -> str:
-    ret = ''
-    for ifc in ifcond:
-        ret += mcgen('''
+def gen_ifcond(ifcond: Optional[Union[str, Dict[str, Any]]],
+               cond_fmt: str, not_fmt: str,
+               all_operator: str, any_operator: str) -> str:
+
+    def do_gen(ifcond: Union[str, Dict[str, Any]],
+               need_parens: bool) -> str:
+        if isinstance(ifcond, str):
+            return cond_fmt % ifcond
+        assert isinstance(ifcond, dict) and len(ifcond) == 1
+        if 'not' in ifcond:
+            return not_fmt % do_gen(ifcond['not'], True)
+        if 'all' in ifcond:
+            gen = gen_infix(all_operator, ifcond['all'])
+        else:
+            gen = gen_infix(any_operator, ifcond['any'])
+        if need_parens:
+            gen = '(' + gen + ')'
+        return gen
+
+    def gen_infix(operator: str, operands: Sequence[Any]) -> str:
+        return operator.join([do_gen(o, True) for o in operands])
+
+    if not ifcond:
+        return ''
+    return do_gen(ifcond, False)
+
+
+def cgen_ifcond(ifcond: Optional[Union[str, Dict[str, Any]]]) -> str:
+    return gen_ifcond(ifcond, 'defined(%s)', '!%s', ' && ', ' || ')
+
+
+def docgen_ifcond(ifcond: Optional[Union[str, Dict[str, Any]]]) -> str:
+    # TODO Doc generated for conditions needs polish
+    return gen_ifcond(ifcond, '%s', 'not %s', ' and ', ' or ')
+
+
+def gen_if(cond: str) -> str:
+    if not cond:
+        return ''
+    return mcgen('''
 #if %(cond)s
-''', cond=ifc)
-    return ret
+''', cond=cond)
 
 
-def gen_endif(ifcond: Sequence[str]) -> str:
-    ret = ''
-    for ifc in reversed(ifcond):
-        ret += mcgen('''
+def gen_endif(cond: str) -> str:
+    if not cond:
+        return ''
+    return mcgen('''
 #endif /* %(cond)s */
-''', cond=ifc)
-    return ret
+''', cond=cond)
 
 
 def must_match(pattern: str, string: str) -> Match[str]:

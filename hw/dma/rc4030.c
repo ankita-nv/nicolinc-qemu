@@ -568,7 +568,7 @@ static const VMStateDescription vmstate_rc4030 = {
     .name = "rc4030",
     .version_id = 3,
     .post_load = rc4030_post_load,
-    .fields = (VMStateField []) {
+    .fields = (const VMStateField []) {
         VMSTATE_UINT32(config, rc4030State),
         VMSTATE_UINT32(invalid_address_register, rc4030State),
         VMSTATE_UINT32_2DARRAY(dma_regs, rc4030State, 8, 4),
@@ -646,8 +646,8 @@ static rc4030_dma *rc4030_allocate_dmas(void *opaque, int n)
     struct rc4030DMAState *p;
     int i;
 
-    s = (rc4030_dma *)g_new0(rc4030_dma, n);
-    p = (struct rc4030DMAState *)g_new0(struct rc4030DMAState, n);
+    s = g_new0(rc4030_dma, n);
+    p = g_new0(struct rc4030DMAState, n);
     for (i = 0; i < n; i++) {
         p->opaque = opaque;
         p->n = i;
@@ -707,7 +707,7 @@ static void rc4030_class_init(ObjectClass *klass, void *class_data)
 
     dc->realize = rc4030_realize;
     dc->unrealize = rc4030_unrealize;
-    dc->reset = rc4030_reset;
+    device_class_set_legacy_reset(dc, rc4030_reset);
     dc->vmsd = &vmstate_rc4030;
 }
 

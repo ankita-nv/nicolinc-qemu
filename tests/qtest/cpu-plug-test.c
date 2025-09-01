@@ -9,10 +9,9 @@
 
 #include "qemu/osdep.h"
 
-#include "qemu-common.h"
 #include "libqtest-single.h"
-#include "qapi/qmp/qdict.h"
-#include "qapi/qmp/qlist.h"
+#include "qobject/qdict.h"
+#include "qobject/qlist.h"
 
 struct PlugTestData {
     char *machine;

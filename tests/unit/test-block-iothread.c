@@ -24,22 +24,33 @@
 
 #include "qemu/osdep.h"
 #include "block/block.h"
+#include "block/block_int-global-state.h"
 #include "block/blockjob_int.h"
-#include "sysemu/block-backend.h"
+#include "system/block-backend.h"
 #include "qapi/error.h"
-#include "qapi/qmp/qdict.h"
+#include "qobject/qdict.h"
+#include "qemu/clang-tsa.h"
 #include "qemu/main-loop.h"
 #include "iothread.h"
 
-static int coroutine_fn bdrv_test_co_prwv(BlockDriverState *bs,
-                                          uint64_t offset, uint64_t bytes,
-                                          QEMUIOVector *qiov, int flags)
+static int coroutine_fn bdrv_test_co_preadv(BlockDriverState *bs,
+                                            int64_t offset, int64_t bytes,
+                                            QEMUIOVector *qiov,
+                                            BdrvRequestFlags flags)
+{
+    return 0;
+}
+
+static int coroutine_fn bdrv_test_co_pwritev(BlockDriverState *bs,
+                                             int64_t offset, int64_t bytes,
+                                             QEMUIOVector *qiov,
+                                             BdrvRequestFlags flags)
 {
     return 0;
 }
 
 static int coroutine_fn bdrv_test_co_pdiscard(BlockDriverState *bs,
-                                              int64_t offset, int bytes)
+                                              int64_t offset, int64_t bytes)
 {
     return 0;
 }
@@ -66,8 +77,8 @@ static BlockDriver bdrv_test = {
     .format_name            = "test",
     .instance_size          = 1,
 
-    .bdrv_co_preadv         = bdrv_test_co_prwv,
-    .bdrv_co_pwritev        = bdrv_test_co_prwv,
+    .bdrv_co_preadv         = bdrv_test_co_preadv,
+    .bdrv_co_pwritev        = bdrv_test_co_pwritev,
     .bdrv_co_pdiscard       = bdrv_test_co_pdiscard,
     .bdrv_co_truncate       = bdrv_test_co_truncate,
     .bdrv_co_block_status   = bdrv_test_co_block_status,
@@ -79,11 +90,11 @@ static void test_sync_op_pread(BdrvChild *c)
     int ret;
 
     /* Success */
-    ret = bdrv_pread(c, 0, buf, sizeof(buf));
-    g_assert_cmpint(ret, ==, 512);
+    ret = bdrv_pread(c, 0, sizeof(buf), buf, 0);
+    g_assert_cmpint(ret, ==, 0);
 
     /* Early error: Negative offset */
-    ret = bdrv_pread(c, -2, buf, sizeof(buf));
+    ret = bdrv_pread(c, -2, sizeof(buf), buf, 0);
     g_assert_cmpint(ret, ==, -EIO);
 }
 
@@ -93,11 +104,11 @@ static void test_sync_op_pwrite(BdrvChild *c)
     int ret;
 
     /* Success */
-    ret = bdrv_pwrite(c, 0, buf, sizeof(buf));
-    g_assert_cmpint(ret, ==, 512);
+    ret = bdrv_pwrite(c, 0, sizeof(buf), buf, 0);
+    g_assert_cmpint(ret, ==, 0);
 
     /* Early error: Negative offset */
-    ret = bdrv_pwrite(c, -2, buf, sizeof(buf));
+    ret = bdrv_pwrite(c, -2, sizeof(buf), buf, 0);
     g_assert_cmpint(ret, ==, -EIO);
 }
 
@@ -107,11 +118,11 @@ static void test_sync_op_blk_pread(BlockBackend *blk)
     int ret;
 
     /* Success */
-    ret = blk_pread(blk, 0, buf, sizeof(buf));
-    g_assert_cmpint(ret, ==, 512);
+    ret = blk_pread(blk, 0, sizeof(buf), buf, 0);
+    g_assert_cmpint(ret, ==, 0);
 
     /* Early error: Negative offset */
-    ret = blk_pread(blk, -2, buf, sizeof(buf));
+    ret = blk_pread(blk, -2, sizeof(buf), buf, 0);
     g_assert_cmpint(ret, ==, -EIO);
 }
 
@@ -121,11 +132,98 @@ static void test_sync_op_blk_pwrite(BlockBackend *blk)
     int ret;
 
     /* Success */
-    ret = blk_pwrite(blk, 0, buf, sizeof(buf), 0);
-    g_assert_cmpint(ret, ==, 512);
+    ret = blk_pwrite(blk, 0, sizeof(buf), buf, 0);
+    g_assert_cmpint(ret, ==, 0);
 
     /* Early error: Negative offset */
-    ret = blk_pwrite(blk, -2, buf, sizeof(buf), 0);
+    ret = blk_pwrite(blk, -2, sizeof(buf), buf, 0);
+    g_assert_cmpint(ret, ==, -EIO);
+}
+
+static void test_sync_op_blk_preadv(BlockBackend *blk)
+{
+    uint8_t buf[512];
+    QEMUIOVector qiov = QEMU_IOVEC_INIT_BUF(qiov, buf, sizeof(buf));
+    int ret;
+
+    /* Success */
+    ret = blk_preadv(blk, 0, sizeof(buf), &qiov, 0);
+    g_assert_cmpint(ret, ==, 0);
+
+    /* Early error: Negative offset */
+    ret = blk_preadv(blk, -2, sizeof(buf), &qiov, 0);
+    g_assert_cmpint(ret, ==, -EIO);
+}
+
+static void test_sync_op_blk_pwritev(BlockBackend *blk)
+{
+    uint8_t buf[512] = { 0 };
+    QEMUIOVector qiov = QEMU_IOVEC_INIT_BUF(qiov, buf, sizeof(buf));
+    int ret;
+
+    /* Success */
+    ret = blk_pwritev(blk, 0, sizeof(buf), &qiov, 0);
+    g_assert_cmpint(ret, ==, 0);
+
+    /* Early error: Negative offset */
+    ret = blk_pwritev(blk, -2, sizeof(buf), &qiov, 0);
+    g_assert_cmpint(ret, ==, -EIO);
+}
+
+static void test_sync_op_blk_preadv_part(BlockBackend *blk)
+{
+    uint8_t buf[512];
+    QEMUIOVector qiov = QEMU_IOVEC_INIT_BUF(qiov, buf, sizeof(buf));
+    int ret;
+
+    /* Success */
+    ret = blk_preadv_part(blk, 0, sizeof(buf), &qiov, 0, 0);
+    g_assert_cmpint(ret, ==, 0);
+
+    /* Early error: Negative offset */
+    ret = blk_preadv_part(blk, -2, sizeof(buf), &qiov, 0, 0);
+    g_assert_cmpint(ret, ==, -EIO);
+}
+
+static void test_sync_op_blk_pwritev_part(BlockBackend *blk)
+{
+    uint8_t buf[512] = { 0 };
+    QEMUIOVector qiov = QEMU_IOVEC_INIT_BUF(qiov, buf, sizeof(buf));
+    int ret;
+
+    /* Success */
+    ret = blk_pwritev_part(blk, 0, sizeof(buf), &qiov, 0, 0);
+    g_assert_cmpint(ret, ==, 0);
+
+    /* Early error: Negative offset */
+    ret = blk_pwritev_part(blk, -2, sizeof(buf), &qiov, 0, 0);
+    g_assert_cmpint(ret, ==, -EIO);
+}
+
+static void test_sync_op_blk_pwrite_compressed(BlockBackend *blk)
+{
+    uint8_t buf[512] = { 0 };
+    int ret;
+
+    /* Late error: Not supported */
+    ret = blk_pwrite_compressed(blk, 0, sizeof(buf), buf);
+    g_assert_cmpint(ret, ==, -ENOTSUP);
+
+    /* Early error: Negative offset */
+    ret = blk_pwrite_compressed(blk, -2, sizeof(buf), buf);
+    g_assert_cmpint(ret, ==, -EIO);
+}
+
+static void test_sync_op_blk_pwrite_zeroes(BlockBackend *blk)
+{
+    int ret;
+
+    /* Success */
+    ret = blk_pwrite_zeroes(blk, 0, 512, 0);
+    g_assert_cmpint(ret, ==, 0);
+
+    /* Early error: Negative offset */
+    ret = blk_pwrite_zeroes(blk, -2, 512, 0);
     g_assert_cmpint(ret, ==, -EIO);
 }
 
@@ -202,7 +300,21 @@ static void test_sync_op_truncate(BdrvChild *c)
     c->bs->open_flags |= BDRV_O_RDWR;
 }
 
-static void test_sync_op_block_status(BdrvChild *c)
+static void test_sync_op_blk_truncate(BlockBackend *blk)
+{
+    int ret;
+
+    /* Normal success path */
+    ret = blk_truncate(blk, 65536, false, PREALLOC_MODE_OFF, 0, NULL);
+    g_assert_cmpint(ret, ==, 0);
+
+    /* Early error: Negative offset */
+    ret = blk_truncate(blk, -2, false, PREALLOC_MODE_OFF, 0, NULL);
+    g_assert_cmpint(ret, ==, -EINVAL);
+}
+
+/* Disable TSA to make bdrv_test.bdrv_co_block_status writable */
+static void TSA_NO_TSA test_sync_op_block_status(BdrvChild *c)
 {
     int ret;
     int64_t n;
@@ -270,10 +382,13 @@ static void test_sync_op_check(BdrvChild *c)
     g_assert_cmpint(ret, ==, -ENOTSUP);
 }
 
-static void test_sync_op_invalidate_cache(BdrvChild *c)
+static void test_sync_op_activate(BdrvChild *c)
 {
+    GLOBAL_STATE_CODE();
+    GRAPH_RDLOCK_GUARD_MAINLOOP();
+
     /* Early success: Image is not inactive */
-    bdrv_invalidate_cache(c->bs, NULL);
+    bdrv_activate(c->bs, NULL);
 }
 
 
@@ -293,6 +408,30 @@ const SyncOpTest sync_op_tests[] = {
         .fn     = test_sync_op_pwrite,
         .blkfn  = test_sync_op_blk_pwrite,
     }, {
+        .name   = "/sync-op/preadv",
+        .fn     = NULL,
+        .blkfn  = test_sync_op_blk_preadv,
+    }, {
+        .name   = "/sync-op/pwritev",
+        .fn     = NULL,
+        .blkfn  = test_sync_op_blk_pwritev,
+    }, {
+        .name   = "/sync-op/preadv_part",
+        .fn     = NULL,
+        .blkfn  = test_sync_op_blk_preadv_part,
+    }, {
+        .name   = "/sync-op/pwritev_part",
+        .fn     = NULL,
+        .blkfn  = test_sync_op_blk_pwritev_part,
+    }, {
+        .name   = "/sync-op/pwrite_compressed",
+        .fn     = NULL,
+        .blkfn  = test_sync_op_blk_pwrite_compressed,
+    }, {
+        .name   = "/sync-op/pwrite_zeroes",
+        .fn     = NULL,
+        .blkfn  = test_sync_op_blk_pwrite_zeroes,
+    }, {
         .name   = "/sync-op/load_vmstate",
         .fn     = test_sync_op_load_vmstate,
     }, {
@@ -305,6 +444,7 @@ const SyncOpTest sync_op_tests[] = {
     }, {
         .name   = "/sync-op/truncate",
         .fn     = test_sync_op_truncate,
+        .blkfn  = test_sync_op_blk_truncate,
     }, {
         .name   = "/sync-op/block_status",
         .fn     = test_sync_op_block_status,
@@ -316,8 +456,8 @@ const SyncOpTest sync_op_tests[] = {
         .name   = "/sync-op/check",
         .fn     = test_sync_op_check,
     }, {
-        .name   = "/sync-op/invalidate_cache",
-        .fn     = test_sync_op_invalidate_cache,
+        .name   = "/sync-op/activate",
+        .fn     = test_sync_op_activate,
     },
 };
 
@@ -332,20 +472,25 @@ static void test_sync_op(const void *opaque)
     BlockDriverState *bs;
     BdrvChild *c;
 
+    GLOBAL_STATE_CODE();
+
     blk = blk_new(qemu_get_aio_context(), BLK_PERM_ALL, BLK_PERM_ALL);
     bs = bdrv_new_open_driver(&bdrv_test, "base", BDRV_O_RDWR, &error_abort);
     bs->total_sectors = 65536 / BDRV_SECTOR_SIZE;
     blk_insert_bs(blk, bs, &error_abort);
+
+    bdrv_graph_rdlock_main_loop();
     c = QLIST_FIRST(&bs->parents);
+    bdrv_graph_rdunlock_main_loop();
 
     blk_set_aio_context(blk, ctx, &error_abort);
-    aio_context_acquire(ctx);
-    t->fn(c);
+    if (t->fn) {
+        t->fn(c);
+    }
     if (t->blkfn) {
         t->blkfn(blk);
     }
     blk_set_aio_context(blk, qemu_get_aio_context(), &error_abort);
-    aio_context_release(ctx);
 
     bdrv_unref(bs);
     blk_unref(blk);
@@ -430,9 +575,7 @@ static void test_attach_blockjob(void)
         aio_poll(qemu_get_aio_context(), false);
     }
 
-    aio_context_acquire(ctx);
     blk_set_aio_context(blk, qemu_get_aio_context(), &error_abort);
-    aio_context_release(ctx);
 
     tjob->n = 0;
     while (tjob->n == 0) {
@@ -446,10 +589,10 @@ static void test_attach_blockjob(void)
         aio_poll(qemu_get_aio_context(), false);
     }
 
-    aio_context_acquire(ctx);
-    job_complete_sync(&tjob->common.job, &error_abort);
+    WITH_JOB_LOCK_GUARD() {
+        job_complete_sync_locked(&tjob->common.job, &error_abort);
+    }
     blk_set_aio_context(blk, qemu_get_aio_context(), &error_abort);
-    aio_context_release(ctx);
 
     bdrv_unref(bs);
     blk_unref(blk);
@@ -506,9 +649,7 @@ static void test_propagate_basic(void)
 
     /* Switch the AioContext back */
     main_ctx = qemu_get_aio_context();
-    aio_context_acquire(ctx);
     blk_set_aio_context(blk, main_ctx, &error_abort);
-    aio_context_release(ctx);
     g_assert(blk_get_aio_context(blk) == main_ctx);
     g_assert(bdrv_get_aio_context(bs_a) == main_ctx);
     g_assert(bdrv_get_aio_context(bs_verify) == main_ctx);
@@ -584,9 +725,7 @@ static void test_propagate_diamond(void)
 
     /* Switch the AioContext back */
     main_ctx = qemu_get_aio_context();
-    aio_context_acquire(ctx);
     blk_set_aio_context(blk, main_ctx, &error_abort);
-    aio_context_release(ctx);
     g_assert(blk_get_aio_context(blk) == main_ctx);
     g_assert(bdrv_get_aio_context(bs_verify) == main_ctx);
     g_assert(bdrv_get_aio_context(bs_a) == main_ctx);
@@ -607,7 +746,7 @@ static void test_propagate_mirror(void)
     AioContext *main_ctx = qemu_get_aio_context();
     BlockDriverState *src, *target, *filter;
     BlockBackend *blk;
-    Job *job;
+    Job *job = NULL;
     Error *local_err = NULL;
 
     /* Create src and target*/
@@ -621,20 +760,21 @@ static void test_propagate_mirror(void)
                  BLOCKDEV_ON_ERROR_REPORT, BLOCKDEV_ON_ERROR_REPORT,
                  false, "filter_node", MIRROR_COPY_MODE_BACKGROUND,
                  &error_abort);
-    job = job_get("job0");
+
+    WITH_JOB_LOCK_GUARD() {
+        job = job_get_locked("job0");
+    }
     filter = bdrv_find_node("filter_node");
 
     /* Change the AioContext of src */
-    bdrv_try_set_aio_context(src, ctx, &error_abort);
+    bdrv_try_change_aio_context(src, ctx, NULL, &error_abort);
     g_assert(bdrv_get_aio_context(src) == ctx);
     g_assert(bdrv_get_aio_context(target) == ctx);
     g_assert(bdrv_get_aio_context(filter) == ctx);
     g_assert(job->aio_context == ctx);
 
     /* Change the AioContext of target */
-    aio_context_acquire(ctx);
-    bdrv_try_set_aio_context(target, main_ctx, &error_abort);
-    aio_context_release(ctx);
+    bdrv_try_change_aio_context(target, main_ctx, NULL, &error_abort);
     g_assert(bdrv_get_aio_context(src) == main_ctx);
     g_assert(bdrv_get_aio_context(target) == main_ctx);
     g_assert(bdrv_get_aio_context(filter) == main_ctx);
@@ -643,7 +783,7 @@ static void test_propagate_mirror(void)
     blk = blk_new(qemu_get_aio_context(), 0, BLK_PERM_ALL);
     blk_insert_bs(blk, src, &error_abort);
 
-    bdrv_try_set_aio_context(target, ctx, &local_err);
+    bdrv_try_change_aio_context(target, ctx, NULL, &local_err);
     error_free_or_abort(&local_err);
 
     g_assert(blk_get_aio_context(blk) == main_ctx);
@@ -652,10 +792,8 @@ static void test_propagate_mirror(void)
     g_assert(bdrv_get_aio_context(filter) == main_ctx);
 
     /* ...unless we explicitly allow it */
-    aio_context_acquire(ctx);
     blk_set_allow_aio_context_change(blk, true);
-    bdrv_try_set_aio_context(target, ctx, &error_abort);
-    aio_context_release(ctx);
+    bdrv_try_change_aio_context(target, ctx, NULL, &error_abort);
 
     g_assert(blk_get_aio_context(blk) == ctx);
     g_assert(bdrv_get_aio_context(src) == ctx);
@@ -664,10 +802,8 @@ static void test_propagate_mirror(void)
 
     job_cancel_sync_all();
 
-    aio_context_acquire(ctx);
     blk_set_aio_context(blk, main_ctx, &error_abort);
-    bdrv_try_set_aio_context(target, main_ctx, &error_abort);
-    aio_context_release(ctx);
+    bdrv_try_change_aio_context(target, main_ctx, NULL, &error_abort);
 
     blk_unref(blk);
     bdrv_unref(src);
@@ -692,13 +828,12 @@ static void test_attach_second_node(void)
     qdict_put_str(options, "file", "base");
 
     filter = bdrv_open(NULL, NULL, options, BDRV_O_RDWR, &error_abort);
+
     g_assert(blk_get_aio_context(blk) == ctx);
     g_assert(bdrv_get_aio_context(bs) == ctx);
     g_assert(bdrv_get_aio_context(filter) == ctx);
 
-    aio_context_acquire(ctx);
     blk_set_aio_context(blk, main_ctx, &error_abort);
-    aio_context_release(ctx);
     g_assert(blk_get_aio_context(blk) == main_ctx);
     g_assert(bdrv_get_aio_context(bs) == main_ctx);
     g_assert(bdrv_get_aio_context(filter) == main_ctx);
@@ -725,9 +860,7 @@ static void test_attach_preserve_blk_ctx(void)
     g_assert(bdrv_get_aio_context(bs) == ctx);
 
     /* Remove the node again */
-    aio_context_acquire(ctx);
     blk_remove_bs(blk);
-    aio_context_release(ctx);
     g_assert(blk_get_aio_context(blk) == ctx);
     g_assert(bdrv_get_aio_context(bs) == qemu_get_aio_context());
 
@@ -736,9 +869,7 @@ static void test_attach_preserve_blk_ctx(void)
     g_assert(blk_get_aio_context(blk) == ctx);
     g_assert(bdrv_get_aio_context(bs) == ctx);
 
-    aio_context_acquire(ctx);
     blk_set_aio_context(blk, qemu_get_aio_context(), &error_abort);
-    aio_context_release(ctx);
     bdrv_unref(bs);
     blk_unref(blk);
 }

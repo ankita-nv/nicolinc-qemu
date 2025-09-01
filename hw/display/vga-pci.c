@@ -1,7 +1,7 @@
 /*
  * QEMU PCI VGA Emulator.
  *
- * see docs/specs/standard-vga.txt for virtual hardware specs.
+ * see docs/specs/standard-vga.rst for virtual hardware specs.
  *
  * Copyright (c) 2003 Fabrice Bellard
  *
@@ -25,16 +25,18 @@
  */
 
 #include "qemu/osdep.h"
-#include "hw/pci/pci.h"
+#include "hw/pci/pci_device.h"
 #include "hw/qdev-properties.h"
 #include "migration/vmstate.h"
 #include "vga_int.h"
 #include "ui/pixel_ops.h"
+#include "ui/console.h"
 #include "qemu/module.h"
 #include "qemu/timer.h"
 #include "hw/loader.h"
 #include "hw/display/edid.h"
 #include "qom/object.h"
+#include "hw/acpi/acpi_aml_interface.h"
 
 enum vga_pci_flags {
     PCI_VGA_FLAG_ENABLE_MMIO = 1,
@@ -59,7 +61,7 @@ static const VMStateDescription vmstate_vga_pci = {
     .name = "vga",
     .version_id = 2,
     .minimum_version_id = 2,
-    .fields = (VMStateField[]) {
+    .fields = (const VMStateField[]) {
         VMSTATE_PCI_DEVICE(dev, PCIVGAState),
         VMSTATE_STRUCT(vga, PCIVGAState, 0, vmstate_vga_common, VGACommonState),
         VMSTATE_END_OF_LIST()
@@ -239,7 +241,9 @@ static void pci_std_vga_realize(PCIDevice *dev, Error **errp)
     bool edid = false;
 
     /* vga + console init */
-    vga_common_init(s, OBJECT(dev));
+    if (!vga_common_init(s, OBJECT(dev), errp)) {
+        return;
+    }
     vga_init(s, OBJECT(dev), pci_address_space(dev), pci_address_space_io(dev),
              true);
 
@@ -275,7 +279,9 @@ static void pci_secondary_vga_realize(PCIDevice *dev, Error **errp)
     bool edid = false;
 
     /* vga + console init */
-    vga_common_init(s, OBJECT(dev));
+    if (!vga_common_init(s, OBJECT(dev), errp)) {
+        return;
+    }
     s->con = graphic_console_init(DEVICE(dev), 0, s->hw_ops, s);
 
     /* mmio bar */
@@ -324,7 +330,7 @@ static void pci_secondary_vga_reset(DeviceState *dev)
     vga_common_reset(&d->vga);
 }
 
-static Property vga_pci_properties[] = {
+static const Property vga_pci_properties[] = {
     DEFINE_PROP_UINT32("vgamem_mb", PCIVGAState, vga.vram_size_mb, 16),
     DEFINE_PROP_BIT("mmio", PCIVGAState, flags, PCI_VGA_FLAG_ENABLE_MMIO, true),
     DEFINE_PROP_BIT("qemu-extended-regs",
@@ -333,28 +339,28 @@ static Property vga_pci_properties[] = {
                     PCIVGAState, flags, PCI_VGA_FLAG_ENABLE_EDID, true),
     DEFINE_EDID_PROPERTIES(PCIVGAState, edid_info),
     DEFINE_PROP_BOOL("global-vmstate", PCIVGAState, vga.global_vmstate, false),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
-static Property secondary_pci_properties[] = {
+static const Property secondary_pci_properties[] = {
     DEFINE_PROP_UINT32("vgamem_mb", PCIVGAState, vga.vram_size_mb, 16),
     DEFINE_PROP_BIT("qemu-extended-regs",
                     PCIVGAState, flags, PCI_VGA_FLAG_ENABLE_QEXT, true),
     DEFINE_PROP_BIT("edid",
                     PCIVGAState, flags, PCI_VGA_FLAG_ENABLE_EDID, true),
     DEFINE_EDID_PROPERTIES(PCIVGAState, edid_info),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void vga_pci_class_init(ObjectClass *klass, void *data)
 {
     DeviceClass *dc = DEVICE_CLASS(klass);
     PCIDeviceClass *k = PCI_DEVICE_CLASS(klass);
+    AcpiDevAmlIfClass *adevc = ACPI_DEV_AML_IF_CLASS(klass);
 
     k->vendor_id = PCI_VENDOR_ID_QEMU;
     k->device_id = PCI_DEVICE_ID_QEMU_VGA;
     dc->vmsd = &vmstate_vga_pci;
     set_bit(DEVICE_CATEGORY_DISPLAY, dc->categories);
+    adevc->build_dev_aml = build_vga_aml;
 }
 
 static const TypeInfo vga_pci_type_info = {
@@ -365,6 +371,7 @@ static const TypeInfo vga_pci_type_info = {
     .class_init = vga_pci_class_init,
     .interfaces = (InterfaceInfo[]) {
         { INTERFACE_CONVENTIONAL_PCI_DEVICE },
+        { TYPE_ACPI_DEV_AML_IF },
         { },
     },
 };
@@ -394,7 +401,7 @@ static void secondary_class_init(ObjectClass *klass, void *data)
     k->exit = pci_secondary_vga_exit;
     k->class_id = PCI_CLASS_DISPLAY_OTHER;
     device_class_set_props(dc, secondary_pci_properties);
-    dc->reset = pci_secondary_vga_reset;
+    device_class_set_legacy_reset(dc, pci_secondary_vga_reset);
 }
 
 static const TypeInfo vga_info = {

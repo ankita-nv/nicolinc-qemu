@@ -15,7 +15,7 @@
 #include "hw/s390x/adapter.h"
 #include "hw/s390x/s390_flic.h"
 #include "hw/s390x/ioinst.h"
-#include "sysemu/kvm.h"
+#include "system/kvm.h"
 #include "target/s390x/cpu-qom.h"
 
 /* Channel subsystem constants. */
@@ -146,7 +146,8 @@ struct SubchDev {
 
 static inline void sch_gen_unit_exception(SubchDev *sch)
 {
-    sch->curr_status.scsw.ctrl &= ~SCSW_ACTL_START_PEND;
+    sch->curr_status.scsw.ctrl &= ~(SCSW_ACTL_DEVICE_ACTIVE |
+                                    SCSW_ACTL_SUBCH_ACTIVE);
     sch->curr_status.scsw.ctrl |= SCSW_STCTL_PRIMARY |
                                   SCSW_STCTL_SECONDARY |
                                   SCSW_STCTL_ALERT |
@@ -232,7 +233,7 @@ typedef enum {
 } CssIoAdapterType;
 
 void css_adapter_interrupt(CssIoAdapterType type, uint8_t isc);
-int css_do_sic(CPUS390XState *env, uint8_t isc, uint16_t mode);
+int css_do_sic(S390CPU *cpu, uint8_t isc, uint16_t mode);
 uint32_t css_get_adapter_id(CssIoAdapterType type, uint8_t isc);
 void css_register_io_adapters(CssIoAdapterType type, bool swap, bool maskable,
                               uint8_t flags, Error **errp);
@@ -331,5 +332,11 @@ static inline int ccw_dstream_read_buf(CcwDataStream *cds, void *buff, int len)
 
 #define ccw_dstream_read(cds, v) ccw_dstream_read_buf((cds), &(v), sizeof(v))
 #define ccw_dstream_write(cds, v) ccw_dstream_write_buf((cds), &(v), sizeof(v))
+
+/**
+ * true if (vmstate based) migration of the channel subsystem
+ * is enabled, false if it is disabled.
+ */
+extern bool css_migration_enabled;
 
 #endif

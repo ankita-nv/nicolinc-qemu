@@ -11,8 +11,8 @@
 #include "qapi/error.h"
 #include "qemu/error-report.h"
 #include "qemu/units.h"
-#include "sysemu/block-backend.h"
-#include "sysemu/blockdev.h"
+#include "system/block-backend.h"
+#include "system/blockdev.h"
 #include "hw/loader.h"
 #include "hw/ppc/pnv_pnor.h"
 #include "hw/qdev-properties.h"
@@ -36,7 +36,7 @@ static void pnv_pnor_update(PnvPnor *s, int offset, int size)
     int offset_end;
     int ret;
 
-    if (s->blk) {
+    if (!s->blk || !blk_is_writable(s->blk)) {
         return;
     }
 
@@ -44,8 +44,8 @@ static void pnv_pnor_update(PnvPnor *s, int offset, int size)
     offset = QEMU_ALIGN_DOWN(offset, BDRV_SECTOR_SIZE);
     offset_end = QEMU_ALIGN_UP(offset_end, BDRV_SECTOR_SIZE);
 
-    ret = blk_pwrite(s->blk, offset, s->storage + offset,
-                     offset_end - offset, 0);
+    ret = blk_pwrite(s->blk, offset, offset_end - offset, s->storage + offset,
+                     0);
     if (ret < 0) {
         error_report("Could not update PNOR offset=0x%" PRIx32" : %s", offset,
                      strerror(-ret));
@@ -99,7 +99,7 @@ static void pnv_pnor_realize(DeviceState *dev, Error **errp)
 
         s->storage = blk_blockalign(s->blk, s->size);
 
-        if (blk_pread(s->blk, 0, s->storage, s->size) != s->size) {
+        if (blk_pread(s->blk, 0, s->size, s->storage, 0) < 0) {
             error_setg(errp, "failed to read the initial flash content");
             return;
         }
@@ -112,10 +112,9 @@ static void pnv_pnor_realize(DeviceState *dev, Error **errp)
                           TYPE_PNV_PNOR, s->size);
 }
 
-static Property pnv_pnor_properties[] = {
+static const Property pnv_pnor_properties[] = {
     DEFINE_PROP_INT64("size", PnvPnor, size, 128 * MiB),
     DEFINE_PROP_DRIVE("drive", PnvPnor, blk),
-    DEFINE_PROP_END_OF_LIST(),
 };
 
 static void pnv_pnor_class_init(ObjectClass *klass, void *data)

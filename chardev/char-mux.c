@@ -26,8 +26,10 @@
 #include "qapi/error.h"
 #include "qemu/module.h"
 #include "qemu/option.h"
+#include "qemu/bitops.h"
 #include "chardev/char.h"
-#include "sysemu/block-backend.h"
+#include "system/block-backend.h"
+#include "qapi/qapi-commands-control.h"
 #include "chardev-internal.h"
 
 /* MUX driver for serial I/O splitting */
@@ -72,11 +74,11 @@ static int mux_chr_write(Chardev *chr, const uint8_t *buf, int len)
                  * qemu_chr_fe_write and background I/O callbacks */
                 qemu_chr_fe_write_all(&d->chr,
                                       (uint8_t *)buf1, strlen(buf1));
-                d->linestart = 0;
+                d->linestart = false;
             }
             ret += qemu_chr_fe_write(&d->chr, buf + i, 1);
             if (buf[i] == '\n') {
-                d->linestart = 1;
+                d->linestart = true;
             }
         }
     }
@@ -123,7 +125,8 @@ static void mux_print_help(Chardev *chr)
     }
 }
 
-static void mux_chr_send_event(MuxChardev *d, int mux_nr, QEMUChrEvent event)
+static void mux_chr_send_event(MuxChardev *d, unsigned int mux_nr,
+                               QEMUChrEvent event)
 {
     CharBackend *be = d->backends[mux_nr];
 
@@ -144,7 +147,7 @@ static void mux_chr_be_event(Chardev *chr, QEMUChrEvent event)
 static int mux_proc_byte(Chardev *chr, MuxChardev *d, int ch)
 {
     if (d->term_got_escape) {
-        d->term_got_escape = 0;
+        d->term_got_escape = false;
         if (ch == term_escape_char) {
             goto send_char;
         }
@@ -157,7 +160,7 @@ static int mux_proc_byte(Chardev *chr, MuxChardev *d, int ch)
             {
                  const char *term =  "QEMU: Terminated\n\r";
                  qemu_chr_write_all(chr, (uint8_t *)term, strlen(term));
-                 exit(0);
+                 qmp_quit(NULL);
                  break;
             }
         case 's':
@@ -166,19 +169,26 @@ static int mux_proc_byte(Chardev *chr, MuxChardev *d, int ch)
         case 'b':
             qemu_chr_be_event(chr, CHR_EVENT_BREAK);
             break;
-        case 'c':
-            assert(d->mux_cnt > 0); /* handler registered with first fe */
+        case 'c': {
+            unsigned int bit;
+
+            /* Handler registered with first fe */
+            assert(d->mux_bitset != 0);
             /* Switch to the next registered device */
-            mux_set_focus(chr, (d->focus + 1) % d->mux_cnt);
+            bit = find_next_bit(&d->mux_bitset, MAX_MUX, d->focus + 1);
+            if (bit >= MAX_MUX) {
+                bit = find_next_bit(&d->mux_bitset, MAX_MUX, 0);
+            }
+            mux_set_focus(chr, bit);
             break;
-        case 't':
+        } case 't':
             d->timestamps = !d->timestamps;
             d->timestamps_start = -1;
-            d->linestart = 0;
+            d->linestart = false;
             break;
         }
     } else if (ch == term_escape_char) {
-        d->term_got_escape = 1;
+        d->term_got_escape = true;
     } else {
     send_char:
         return 1;
@@ -241,15 +251,16 @@ static void mux_chr_read(void *opaque, const uint8_t *buf, int size)
 void mux_chr_send_all_event(Chardev *chr, QEMUChrEvent event)
 {
     MuxChardev *d = MUX_CHARDEV(chr);
-    int i;
+    int bit;
 
     if (!muxes_opened) {
         return;
     }
 
     /* Send the event to all registered listeners */
-    for (i = 0; i < d->mux_cnt; i++) {
-        mux_chr_send_event(d, i, event);
+    bit = -1;
+    while ((bit = find_next_bit(&d->mux_bitset, MAX_MUX, bit + 1)) < MAX_MUX) {
+        mux_chr_send_event(d, bit, event);
     }
 }
 
@@ -274,14 +285,15 @@ static GSource *mux_chr_add_watch(Chardev *s, GIOCondition cond)
 static void char_mux_finalize(Object *obj)
 {
     MuxChardev *d = MUX_CHARDEV(obj);
-    int i;
+    int bit;
 
-    for (i = 0; i < d->mux_cnt; i++) {
-        CharBackend *be = d->backends[i];
-        if (be) {
-            be->chr = NULL;
-        }
+    bit = -1;
+    while ((bit = find_next_bit(&d->mux_bitset, MAX_MUX, bit + 1)) < MAX_MUX) {
+        CharBackend *be = d->backends[bit];
+        be->chr = NULL;
+        d->backends[bit] = NULL;
     }
+    d->mux_bitset = 0;
     qemu_chr_fe_deinit(&d->chr, false);
 }
 
@@ -299,12 +311,46 @@ static void mux_chr_update_read_handlers(Chardev *chr)
                                   chr->gcontext, true, false);
 }
 
-void mux_set_focus(Chardev *chr, int focus)
+bool mux_chr_attach_frontend(MuxChardev *d, CharBackend *b,
+                             unsigned int *tag, Error **errp)
+{
+    unsigned int bit;
+
+    QEMU_BUILD_BUG_ON(MAX_MUX > (sizeof(d->mux_bitset) * BITS_PER_BYTE));
+
+    bit = find_next_zero_bit(&d->mux_bitset, MAX_MUX, 0);
+    if (bit >= MAX_MUX) {
+        error_setg(errp,
+                   "too many uses of multiplexed chardev '%s'"
+                   " (maximum is " stringify(MAX_MUX) ")",
+                   d->parent.label);
+        return false;
+    }
+
+    d->mux_bitset |= (1ul << bit);
+    d->backends[bit] = b;
+    *tag = bit;
+
+    return true;
+}
+
+bool mux_chr_detach_frontend(MuxChardev *d, unsigned int tag)
+{
+    if (!(d->mux_bitset & (1ul << tag))) {
+        return false;
+    }
+
+    d->mux_bitset &= ~(1ul << tag);
+    d->backends[tag] = NULL;
+
+    return true;
+}
+
+void mux_set_focus(Chardev *chr, unsigned int focus)
 {
     MuxChardev *d = MUX_CHARDEV(chr);
 
-    assert(focus >= 0);
-    assert(focus < d->mux_cnt);
+    assert(d->mux_bitset & (1ul << focus));
 
     if (d->focus != -1) {
         mux_chr_send_event(d, d->focus, CHR_EVENT_MUX_OUT);
@@ -386,10 +432,9 @@ void suspend_mux_open(void)
 static int chardev_options_parsed_cb(Object *child, void *opaque)
 {
     Chardev *chr = (Chardev *)child;
-    ChardevClass *class = CHARDEV_GET_CLASS(chr);
 
-    if (!chr->be_open && class->chr_options_parsed) {
-        class->chr_options_parsed(chr);
+    if (!chr->be_open && CHARDEV_IS_MUX(chr)) {
+        open_muxes(chr);
     }
 
     return 0;
@@ -412,7 +457,6 @@ static void char_mux_class_init(ObjectClass *oc, void *data)
     cc->chr_accept_input = mux_chr_accept_input;
     cc->chr_add_watch = mux_chr_add_watch;
     cc->chr_be_event = mux_chr_be_event;
-    cc->chr_options_parsed = open_muxes;
     cc->chr_update_read_handler = mux_chr_update_read_handlers;
 }
 

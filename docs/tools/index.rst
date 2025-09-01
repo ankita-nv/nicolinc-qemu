@@ -1,5 +1,8 @@
+.. _Tools:
+
+-----
 Tools
-=====
+-----
 
 This section of the manual documents QEMU's "tools": its
 command line utilities and other standalone programs.
@@ -12,5 +15,4 @@ command line utilities and other standalone programs.
    qemu-nbd
    qemu-pr-helper
    qemu-trace-stap
-   virtfs-proxy-helper
-   virtiofsd
+   qemu-vmsr-helper

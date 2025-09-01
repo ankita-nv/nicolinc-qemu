@@ -20,14 +20,15 @@
 
 #include "qemu/osdep.h"
 #include "qemu.h"
-#include "cpu_loop-common.h"
+#include "user-internals.h"
+#include "user/cpu_loop.h"
+#include "signal-common.h"
 #include "internal.h"
 
 void cpu_loop(CPUHexagonState *env)
 {
     CPUState *cs = env_cpu(env);
-    int trapnr, signum, sigcode;
-    target_ulong sigaddr;
+    int trapnr;
     target_ulong syscallnum;
     target_ulong ret;
 
@@ -37,15 +38,11 @@ void cpu_loop(CPUHexagonState *env)
         cpu_exec_end(cs);
         process_queued_cpu_work(cs);
 
-        signum = 0;
-        sigcode = 0;
-        sigaddr = 0;
-
         switch (trapnr) {
         case EXCP_INTERRUPT:
             /* just indicate that signals should be handled asap */
             break;
-        case HEX_EXCP_TRAP0:
+        case HEX_EVENT_TRAP0:
             syscallnum = env->gpr[6];
             env->gpr[HEX_REG_PC] += 4;
             ret = do_syscall(env,
@@ -57,42 +54,32 @@ void cpu_loop(CPUHexagonState *env)
                              env->gpr[4],
                              env->gpr[5],
                              0, 0);
-            if (ret == -TARGET_ERESTARTSYS) {
+            if (ret == -QEMU_ERESTARTSYS) {
                 env->gpr[HEX_REG_PC] -= 4;
-            } else if (ret != -TARGET_QEMU_ESIGRETURN) {
+            } else if (ret != -QEMU_ESIGRETURN) {
                 env->gpr[0] = ret;
             }
             break;
-        case HEX_EXCP_FETCH_NO_UPAGE:
-        case HEX_EXCP_PRIV_NO_UREAD:
-        case HEX_EXCP_PRIV_NO_UWRITE:
-            signum = TARGET_SIGSEGV;
-            sigcode = TARGET_SEGV_MAPERR;
+        case HEX_CAUSE_PC_NOT_ALIGNED:
+            force_sig_fault(TARGET_SIGBUS, TARGET_BUS_ADRALN,
+                            env->gpr[HEX_REG_R31]);
             break;
         case EXCP_ATOMIC:
             cpu_exec_step_atomic(cs);
+            break;
+        case EXCP_DEBUG:
+            force_sig_fault(TARGET_SIGTRAP, TARGET_TRAP_BRKPT, 0);
             break;
         default:
             EXCP_DUMP(env, "\nqemu: unhandled CPU exception %#x - aborting\n",
                      trapnr);
             exit(EXIT_FAILURE);
         }
-
-        if (signum) {
-            target_siginfo_t info = {
-                .si_signo = signum,
-                .si_errno = 0,
-                .si_code = sigcode,
-                ._sifields._sigfault._addr = sigaddr
-            };
-            queue_signal(env, info.si_signo, QEMU_SI_KILL, &info);
-        }
-
         process_pending_signals(env);
     }
 }
 
-void target_cpu_copy_regs(CPUArchState *env, struct target_pt_regs *regs)
+void target_cpu_copy_regs(CPUArchState *env, target_pt_regs *regs)
 {
     env->gpr[HEX_REG_PC] = regs->sepc;
     env->gpr[HEX_REG_SP] = regs->sp;

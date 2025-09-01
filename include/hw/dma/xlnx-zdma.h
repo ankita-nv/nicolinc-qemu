@@ -31,7 +31,7 @@
 
 #include "hw/sysbus.h"
 #include "hw/register.h"
-#include "sysemu/dma.h"
+#include "system/dma.h"
 #include "qom/object.h"
 
 #define ZDMA_R_MAX (0x204 / 4)
@@ -56,7 +56,7 @@ struct XlnxZDMA {
     MemoryRegion iomem;
     MemTxAttrs attr;
     MemoryRegion *dma_mr;
-    AddressSpace *dma_as;
+    AddressSpace dma_as;
     qemu_irq irq_zdma_ch_imr;
 
     struct {
